@@ -7,10 +7,9 @@ def create_scatter_plot(instance_name: str, *story_paths: str):
     fig.update_layout(title=f"JSSP - Instance: {instance_name.capitalize()}", legend_title="Algorithms:")
 
     for story in story_paths:
-        with open(f"../solutions/{instance_name}_{story}.txt", "r") as file:
-            name = next(file)
+        with open(f"../solutions/{instance_name}_{story}_history.txt", "r") as file:
             history = tuple(map(int, next(file).split()))
-            fig.add_scatter(y=history, name=name, mode='markers')
+            fig.add_scatter(y=history, name=story.capitalize(), mode='markers')
 
     fig.show()
 

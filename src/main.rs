@@ -14,55 +14,124 @@ trait TerminationCriterion {
     fn should_terminate(&self) -> bool;
 }
 
+trait MakespanFunction {
+
+}
+
 struct BlackBox {
     instance: Rc<Instance>,
     search_space: SearchSpace,
-    makespan: MakespanFunction,
     mapping: RepresentationMapping,
+
+    best_solution: CandidateSolution,
+    best_makespan: usize,
+    best_order: Vec<usize>,
+    history: Vec<usize>,
 
     lower_bound: usize,
     upper_bound: usize,
 }
-
 impl BlackBox {
     pub fn new(instance: Instance) -> Self{
         let p_instance = Rc::new(instance);
-        let mut a = Self {
-            search_space: SearchSpace::new(Rc::clone(&p_instance)),
-            makespan: MakespanFunction::new(Rc::clone(&p_instance)),
-            mapping: RepresentationMapping::new(Rc::clone(&p_instance)),
+        let search_space = SearchSpace::new(Rc::clone(&p_instance));
+        let mut mapping = RepresentationMapping::new(Rc::clone(&p_instance));
+        let best_order = search_space.create();
+        let best_solution = mapping.map(&best_order);
+
+        let mut bb = Self {
+            instance: p_instance,
+            search_space,
+            mapping,
+
+            best_solution,
+            best_makespan: usize::MAX,
+            best_order: Vec::new(),
+            history: Vec::new(),
 
             lower_bound: 0,
             upper_bound: 0,
-            instance: p_instance,
         };
-        a.lower_bound = a.makespan.lower_bound();
-        a.upper_bound = a.makespan.upper_bound();
-        a
+        bb.lower_bound = bb.find_lower_bound();
+        bb.upper_bound = bb.find_upper_bound();
+        bb
+    }
+    pub fn update(&mut self, makespan: &usize, solution: &CandidateSolution, order: &Vec<usize>){
+        self.best_order = order.clone();
+        self.best_solution = solution.clone();
+        self.best_makespan = makespan.clone();
+        self.history.push(self.best_makespan);
+
+    }
+    pub fn save(&self, name: &str) -> std::io::Result<()> {
+        self.save_schedule(name)?;
+        self.save_history(name)?;
+        Ok(())
     }
 
-    pub fn save_history(&self, history: &Vec<usize>, name: &str) -> std::io::Result<()> {
+    fn save_history(&self, name: &str) -> std::io::Result<()> {
         let s = format!("solutions\\{}_{}_history.txt", self.instance.id, name);
         let path = Path::new(s.as_str());
         let mut file = File::create(path)?;
 
-        for i in history.iter() { write!(file, "{} ", i)? }
+        for i in self.history.iter() { write!(file, "{} ", i)? }
         write!(file, "\n")?;
         Ok(())
     }
 
-    pub fn save_schedule(&self, schedule: &CandidateSolution, name: &str) -> std::io::Result<()> {
+    fn save_schedule(&self, name: &str) -> std::io::Result<()> {
         let s = format!("solutions\\{}_{}_solution.txt", self.instance.id, name);
         let path = Path::new(s.as_str());
         let mut file = File::create(path)?;
 
-        writeln!(file, "{}", name)?;
-        for line in schedule.schedule.iter() {
+        writeln!(file, "{} {}", self.instance.n, self.instance.m)?;
+        writeln!(file, "{}", self.best_makespan)?;
+        for line in self.best_solution.schedule.iter() {
             for i in line{ write!(file, "{} ", i)? }
             write!(file, "\n")?;
         }
 
         Ok(())
+    }
+
+    pub fn find_makespan(&self, y: &CandidateSolution) -> usize {
+        y.schedule.iter().map(|x| *x.last().unwrap()).max().expect("Failed to find makespan.")
+    }
+
+    fn find_lower_bound(&mut self) -> usize {
+        let mut a: Vec<usize> = vec![usize::MAX; self.instance.m ];
+        let mut b: Vec<usize> = vec![usize::MAX; self.instance.m ];
+        let mut t: Vec<usize> = vec![0; self.instance.m ];
+
+        let mut bound: usize = 0;
+        for i in (0..self.instance.n ).rev(){
+            let job = &self.instance.jobs[i];
+
+            let job_total_time: usize = (1..job.len()).step_by(2).map(|x| job[x]).sum();
+            bound = max(bound, job_total_time);
+
+            let mut time: usize;
+            let mut machine: usize;
+            let mut job_current_time: usize = 0;
+            for i in (0..job.len()).step_by(2) {
+                machine = job[i] ;
+                time = job[i+1];
+
+                a[machine] = min(a[machine], job_current_time);
+
+                t[machine] += time;
+                job_current_time += time;
+                b[machine] = min(b[machine], job_total_time - job_current_time);
+            }
+        }
+
+        (0..self.instance.m ).map(|i| max(bound, a[i]+b[i]+t[i])).max()
+            .expect("Failed to find the final bound")
+    }
+
+    fn find_upper_bound(&self) -> usize{
+        //Sloppy.
+        self.instance.jobs.iter().map(|j| (1..j.len()).step_by(2).rev().map(|x| j[x]).sum::<usize>()).sum()
     }
 
 }
@@ -157,6 +226,7 @@ impl Instance {
     }
 }
 
+#[derive(Clone, Debug)]
 struct CandidateSolution {
     schedule: Vec<Vec<usize>>,
 }
@@ -167,55 +237,6 @@ impl CandidateSolution {
     }
 }
 
-struct MakespanFunction {
-    instance: Rc<Instance>,
-}
-
-impl MakespanFunction {
-    pub fn new(instance: Rc<Instance>) -> Self{
-        Self{instance}
-    }
-
-    fn find_makespan(&self, y: &CandidateSolution) -> usize {
-        y.schedule.iter().map(|x| *x.last().unwrap()).max().expect("Failed to find makespan.")
-    }
-
-    fn lower_bound(&mut self) -> usize {
-        let mut a: Vec<usize> = vec![usize::MAX; self.instance.m ];
-        let mut b: Vec<usize> = vec![usize::MAX; self.instance.m ];
-        let mut t: Vec<usize> = vec![0; self.instance.m ];
-
-        let mut bound: usize = 0;
-        for i in (0..self.instance.n ).rev(){
-            let job = &self.instance.jobs[i];
-
-            let job_total_time: usize = (1..job.len()).step_by(2).map(|x| job[x]).sum();
-            bound = max(bound, job_total_time);
-
-            let mut time: usize;
-            let mut machine: usize;
-            let mut job_current_time: usize = 0;
-            for i in (0..job.len()).step_by(2) {
-                machine = job[i] ;
-                time = job[i+1];
-
-                a[machine] = min(a[machine], job_current_time);
-
-                t[machine] += time;
-                job_current_time += time;
-                b[machine] = min(b[machine], job_total_time - job_current_time);
-            }
-        }
-
-        (0..self.instance.m ).map(|i| max(bound, a[i]+b[i]+t[i])).max()
-            .expect("Failed to find the final bound")
-    }
-
-    fn upper_bound(&self) -> usize{
-        //Sloppy.
-        self.instance.jobs.iter().map(|j| (1..j.len()).step_by(2).rev().map(|x| j[x]).sum::<usize>()).sum()
-    }
-}
 
 struct RepresentationMapping {
     job_time: Vec<usize>,
@@ -292,12 +313,9 @@ trait NullaryOperator{
 
 struct SingleRandomSample {
     process: BlackBox,
-    random: ThreadRng,
 
-    best_makespan: usize,
     reset_counter: usize,
     reset_limit: usize,
-    history: Vec<usize>,
 }
 
 impl TerminationCriterion for SingleRandomSample {
@@ -308,34 +326,33 @@ impl TerminationCriterion for SingleRandomSample {
 }
 
 impl SingleRandomSample {
-    pub fn new(black_box: BlackBox, random: ThreadRng) -> Self {
+    pub fn new(black_box: BlackBox) -> Self {
         Self {
             process: black_box,
-            random,
-            best_makespan: usize::MAX, reset_counter: 0, reset_limit: 1_000_00,
-            history: vec![]
+            reset_counter: 0,
+            reset_limit: 1_000_00,
         }
     }
 
-    fn solve(&mut self) -> Vec<usize> {
-        let mut order = self.process.search_space.create();
-        let mut schedule: CandidateSolution = self.process.mapping.map(&order);
-        let mut random = thread_rng();
+    pub fn solve(&mut self) -> Vec<usize> {
+        let mut order: Vec<usize> = self.process.search_space.create();
+        let mut solution: CandidateSolution;
+        let mut random: ThreadRng = thread_rng();
 
         while !self.should_terminate() {
             self.reset_counter += 1;
             self.apply(&mut order, &mut random);
 
-            schedule = self.process.mapping.map(&order);
-            let makespan = self.process.makespan.find_makespan(&schedule);
-            if makespan < self.best_makespan {
-                self.best_makespan = makespan;
-                self.history.push(self.best_makespan);
+            solution = self.process.mapping.map(&order);
+            let makespan = self.process.find_makespan(&solution);
+
+            if makespan < self.process.best_makespan {
+                self.process.update(&makespan, &solution, &order);
                 self.reset_counter = 0;
             }
         }
-        self.process.save_history(&self.history, "random").expect("Failed to save.");
-        self.process.save_schedule(&schedule, "random").expect("Failed to save Schedule.");
+
+        self.process.save("random").expect("Failed to Save.");
         order
     }
 }
@@ -352,7 +369,6 @@ fn main() {
     // let random: Rc<ThreadRng> = Rc::new(rand::thread_rng());
 
     let mut random_sample =
-        SingleRandomSample::new(BlackBox::new(instance), thread_rng());
-
+        SingleRandomSample::new(BlackBox::new(instance));
     random_sample.solve();
 }
