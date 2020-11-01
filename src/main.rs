@@ -1,6 +1,6 @@
 use std::rc::Rc;
 use rand::prelude::ThreadRng;
-use std::io::{BufReader, BufRead};
+use std::io::{BufReader, BufRead, Write};
 use std::fs::File;
 use itertools::{Itertools, zip};
 use std::cmp::{max, min};
@@ -8,6 +8,7 @@ use rand::seq::SliceRandom;
 use std::borrow::{BorrowMut, Borrow};
 use std::ops::Deref;
 use rand::{random, thread_rng};
+use std::path::Path;
 
 trait TerminationCriterion {
     fn should_terminate(&self) -> bool;
@@ -24,7 +25,7 @@ struct BlackBox {
 }
 
 impl BlackBox {
-    fn new(instance: Instance) -> Self{
+    pub fn new(instance: Instance) -> Self{
         let p_instance = Rc::new(instance);
         let mut a = Self {
             search_space: SearchSpace::new(Rc::clone(&p_instance)),
@@ -40,8 +41,30 @@ impl BlackBox {
         a
     }
 
-    // fn max_objective_function(&self) -> u64;
-    // fn max_time(&self) -> u64;
+    pub fn save_history(&self, history: &Vec<usize>, name: &str) -> std::io::Result<()> {
+        let s = format!("solutions\\{}_{}_history.txt", self.instance.id, name);
+        let path = Path::new(s.as_str());
+        let mut file = File::create(path)?;
+
+        for i in history.iter() { write!(file, "{} ", i)? }
+        write!(file, "\n")?;
+        Ok(())
+    }
+
+    pub fn save_schedule(&self, schedule: &CandidateSolution, name: &str) -> std::io::Result<()> {
+        let s = format!("solutions\\{}_{}_solution.txt", self.instance.id, name);
+        let path = Path::new(s.as_str());
+        let mut file = File::create(path)?;
+
+        writeln!(file, "{}", name)?;
+        for line in schedule.schedule.iter() {
+            for i in line{ write!(file, "{} ", i)? }
+            write!(file, "\n")?;
+        }
+
+        Ok(())
+    }
+
 }
 
 struct SearchSpace{
@@ -88,7 +111,10 @@ impl Instance {
     }
 
     fn read_orlib(instance_name: String) -> Vec<Vec<usize>> {
-        let contents = BufReader::new(File::open(instance_name.as_str())
+        let s = format!("instances\\{}.txt", instance_name);
+        let path = Path::new(s.as_str());
+
+        let contents = BufReader::new(File::open(path)
             .expect("failed to load the file"));
 
         contents.lines().skip(1).map(|x| {
@@ -101,7 +127,10 @@ impl Instance {
     }
 
     fn read_taillard(instance_name: String) -> Vec<Vec<usize>> {
-        let contents = BufReader::new(File::open(instance_name.as_str())
+        let s = format!("instances\\{}.txt", instance_name);
+        let path = Path::new(s.as_str());
+
+        let contents = BufReader::new(File::open(path)
             .expect("failed to load the file"));
 
         let mut a: usize=0;
@@ -147,7 +176,7 @@ impl MakespanFunction {
         Self{instance}
     }
 
-    fn find_makespan(&self, y: CandidateSolution) -> usize {
+    fn find_makespan(&self, y: &CandidateSolution) -> usize {
         y.schedule.iter().map(|x| *x.last().unwrap()).max().expect("Failed to find makespan.")
     }
 
@@ -189,10 +218,10 @@ impl MakespanFunction {
 }
 
 struct RepresentationMapping {
-    pub job_time: Vec<usize>,
-    pub job_state: Vec<usize>,
-    pub machine_time: Vec<usize>,
-    pub machine_state: Vec<usize>,
+    job_time: Vec<usize>,
+    job_state: Vec<usize>,
+    machine_time: Vec<usize>,
+    machine_state: Vec<usize>,
     jobs: Rc<Vec<Vec<usize>>>,
 }
 
@@ -289,23 +318,25 @@ impl SingleRandomSample {
     }
 
     fn solve(&mut self) -> Vec<usize> {
-        let mut x = self.process.search_space.create();
+        let mut order = self.process.search_space.create();
+        let mut schedule: CandidateSolution = self.process.mapping.map(&order);
         let mut random = thread_rng();
-
 
         while !self.should_terminate() {
             self.reset_counter += 1;
-            self.apply(&mut x, &mut random);
+            self.apply(&mut order, &mut random);
 
-            let y = self.process.mapping.map(&x);
-            let makespan = self.process.makespan.find_makespan(y);
+            schedule = self.process.mapping.map(&order);
+            let makespan = self.process.makespan.find_makespan(&schedule);
             if makespan < self.best_makespan {
                 self.best_makespan = makespan;
                 self.history.push(self.best_makespan);
                 self.reset_counter = 0;
             }
         }
-        x
+        self.process.save_history(&self.history, "random").expect("Failed to save.");
+        self.process.save_schedule(&schedule, "random").expect("Failed to save Schedule.");
+        order
     }
 }
 
@@ -316,16 +347,12 @@ impl NullaryOperator for SingleRandomSample{
 }
 
 fn main() {
-    let file_path = "instances\\la01.txt";
-    let instance: Instance = Instance::new(file_path, "orlib");
+    let instance: Instance = Instance::new("la01", "orlib");
     // let jssp: Rc<BlackBox> = Rc::new(BlackBox::new(instance));
     // let random: Rc<ThreadRng> = Rc::new(rand::thread_rng());
 
-    let mut random_sample = SingleRandomSample::new(BlackBox::new(instance), thread_rng());
+    let mut random_sample =
+        SingleRandomSample::new(BlackBox::new(instance), thread_rng());
 
-    let x = random_sample.solve();
-    println!("lower bound: {}\n upper bound: {}", random_sample.process.lower_bound, random_sample.process.upper_bound);
-    println!("{:?}", x);
-    println!("{}", random_sample.best_makespan);
-    println!("{:?}", random_sample.history);
+    random_sample.solve();
 }

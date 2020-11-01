@@ -15,4 +15,4 @@ def create_scatter_plot(instance_name: str, *story_paths: str):
     fig.show()
 
 
-create_scatter_plot(sys.argv[1], *sys.argv[2:])
+create_scatter_plot(*sys.argv[1:])

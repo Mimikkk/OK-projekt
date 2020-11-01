@@ -3,10 +3,11 @@ from typing import *
 import sys
 
 
-def show_gantt(file_path: str, title: Optional[str] = None, save_path: Optional[str] = None):
+def show_gantt(instance: str, file_name: str, title: Optional[str] = None, save_path: Optional[str] = None):
     """
     Function which produces the Gantt Chart and displays it and/or saves it
-    :param file_path: solution file PATH location
+    :param instance: Instance Name eg. ta01
+    :param file_name: solution file PATH location
     :param title: Title of the figure
     :param save_path: If SAVE_PATH is present the Gantt chart will be save to the given SAVE_PATH
     """
@@ -15,7 +16,7 @@ def show_gantt(file_path: str, title: Optional[str] = None, save_path: Optional[
     m: int
     max_makespan: int
     schedules: List[List[int]] = []
-    with open(f"../solutions/{file_path}.txt", "r") as file:
+    with open(f"../solutions/{instance}_{file_name}_solution.txt", "r") as file:
         (n, m) = map(int, next(file).split())
         max_makespan = int(next(file))
         for _ in range(m):
@@ -67,4 +68,4 @@ def show_gantt(file_path: str, title: Optional[str] = None, save_path: Optional[
     plt.show()
 
 
-show_gantt(*sys.argv[1:4])
+show_gantt(*sys.argv[1:5])
