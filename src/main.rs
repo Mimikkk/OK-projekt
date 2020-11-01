@@ -14,10 +14,6 @@ trait TerminationCriterion {
     fn should_terminate(&self) -> bool;
 }
 
-trait MakespanFunction {
-
-}
-
 struct BlackBox {
     instance: Rc<Instance>,
     search_space: SearchSpace,
@@ -31,6 +27,7 @@ struct BlackBox {
     lower_bound: usize,
     upper_bound: usize,
 }
+
 impl BlackBox {
     pub fn new(instance: Instance) -> Self{
         let p_instance = Rc::new(instance);
@@ -155,6 +152,7 @@ impl SearchSpace {
     }
 }
 
+#[derive(Clone, Debug)]
 struct Instance {
     jobs: Rc<Vec<Vec<usize>>>,
     id: String,
@@ -237,7 +235,6 @@ impl CandidateSolution {
     }
 }
 
-
 struct RepresentationMapping {
     job_time: Vec<usize>,
     job_state: Vec<usize>,
@@ -314,23 +311,23 @@ trait NullaryOperator{
 struct SingleRandomSample {
     process: BlackBox,
 
-    reset_counter: usize,
-    reset_limit: usize,
+    termination_counter: usize,
+    termination_limit: usize,
 }
 
 impl TerminationCriterion for SingleRandomSample {
     fn should_terminate(&self) -> bool {
-        if self.reset_counter % 1_000_0 == 0 {println!("{}", self.reset_counter)}
-        return self.reset_counter >= self.reset_limit
+        if self.termination_counter % 1_000_0 == 0 {println!("{}", self.termination_counter)}
+        return self.termination_counter >= self.termination_limit
     }
 }
 
 impl SingleRandomSample {
-    pub fn new(black_box: BlackBox) -> Self {
+    pub fn new(instance: &Instance) -> Self {
         Self {
-            process: black_box,
-            reset_counter: 0,
-            reset_limit: 1_000_00,
+            process: BlackBox::new(instance.clone()),
+            termination_counter: 0,
+            termination_limit: 1_000_00,
         }
     }
 
@@ -340,7 +337,7 @@ impl SingleRandomSample {
         let mut random: ThreadRng = thread_rng();
 
         while !self.should_terminate() {
-            self.reset_counter += 1;
+            self.termination_counter += 1;
             self.apply(&mut order, &mut random);
 
             solution = self.process.mapping.map(&order);
@@ -352,7 +349,7 @@ impl SingleRandomSample {
             }
         }
 
-        self.process.save("random").expect("Failed to Save.");
+        self.process.save("random_sample").expect("Failed to Save.");
         order
     }
 }
@@ -368,7 +365,6 @@ fn main() {
     // let jssp: Rc<BlackBox> = Rc::new(BlackBox::new(instance));
     // let random: Rc<ThreadRng> = Rc::new(rand::thread_rng());
 
-    let mut random_sample =
-        SingleRandomSample::new(BlackBox::new(instance));
+    let mut random_sample = SingleRandomSample::new(&instance);
     random_sample.solve();
 }
