@@ -1,7 +1,7 @@
 use crate::jssp::*;
 use rand::Rng;
 
-pub struct SingleHillClimber {
+pub struct HillClimber {
     process: BlackBox,
 
     termination_counter: usize,
@@ -11,7 +11,7 @@ pub struct SingleHillClimber {
     reset_counter: usize,
 }
 
-impl SingleHillClimber {
+impl HillClimber {
     pub fn new(instance: &Instance, termination_limit: usize, reset_threshold: usize) -> Self {
         Self {
             process: BlackBox::new(instance.clone()),
@@ -23,25 +23,31 @@ impl SingleHillClimber {
         }
     }
 
-    pub fn solve(&mut self) -> BlackBox {
+    pub fn solve(&mut self, unary_op: &str) -> BlackBox {
         let mut random: ThreadRng = thread_rng();
         let mut best_order = self.process.search_space.create();
         let mut prev_order = best_order.clone();
-        let mut next_order = best_order.clone();
+        let mut next_order: Vec<usize>;
         let mut best_makespan = usize::MAX;
-        let mut next_makespan = usize::MAX;
+        let mut next_makespan : usize;
         let mut prev_makespan = usize::MAX;
         let mut solution: CandidateSolution;
 
+        let search_operator: fn(&Self, &Vec<usize>, &mut ThreadRng) -> Vec<usize>
+            = match unary_op.to_lowercase().as_str() {
+            "1swap" => <Self as UnaryOperator1Swap>::apply,
+            "nswap" => <Self as UnaryOperatorNSwap>::apply,
+            _ => panic!("Unsupported operator"),
+        };
+
         while !self.should_terminate() {
             if self.reset_counter >= self.reset_threshold {
-                prev_order = self.null_apply(&mut random);
+                prev_order = <Self as NullaryOperator>::apply(&self, &mut random);
                 solution = self.process.mapping.map(&prev_order);
                 prev_makespan = self.process.find_makespan(&solution);
                 self.reset_counter = 0;
             }
-
-            next_order = self.uno_apply(&prev_order, &mut random);
+            next_order = search_operator(&self, &prev_order, &mut random);;
             solution = self.process.mapping.map(&next_order);
             next_makespan = self.process.find_makespan(&solution);
 
@@ -62,33 +68,54 @@ impl SingleHillClimber {
         }
 
         self.process.update(&best_order);
-        self.process.save("hill climber-1swaps resets").expect("Failed to save.");
+        let name = format!("hillclimber_{}_restarts", unary_op.to_lowercase());
+        self.process.save(name.as_str()).expect("Failed to save.");
         self.process.clone()
     }
 }
 
-impl TerminationCriterion for SingleHillClimber {
+impl TerminationCriterion for HillClimber {
     fn should_terminate(&self) -> bool {
         return self.termination_counter >= self.termination_limit
     }
 }
 
-impl NullaryOperator for SingleHillClimber {
-    fn null_apply(&self, random: &mut ThreadRng) -> Vec<usize> {
+impl NullaryOperator for HillClimber {
+    fn apply(&self, random: &mut ThreadRng) -> Vec<usize> {
         let mut vec = self.process.search_space.create();
         vec.shuffle(random);
         vec
     }
 }
 
-impl UnaryOperator1Swap for SingleHillClimber {
-    fn uno_apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize> {
+impl UnaryOperator1Swap for HillClimber {
+    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize> {
         let mut result = based.clone();
         let high = based.len();
-        let mut i: usize = random.gen_range(0, high);
+        let i: usize = random.gen_range(0, high);
         let mut j: usize = random.gen_range(0, high);
         while result[i] == result[j] { j = random.gen_range(0, high) }
         result.swap(i,j);
+        result
+    }
+}
+
+impl UnaryOperatorNSwap for HillClimber {
+    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize> {
+        let mut result = based.clone();
+        let high = based.len();
+        let mut should_flip = true;
+        let mut i: usize;
+        let mut j: usize;
+
+        while should_flip {
+            i = random.gen_range(0, high);
+            j = random.gen_range(0, high);
+            while result[i] == result[j] { j = random.gen_range(0, high) }
+            result.swap(i,j);
+
+            should_flip = random.gen();
+        }
         result
     }
 }

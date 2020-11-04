@@ -8,31 +8,31 @@ use rand::prelude::ThreadRng;
 use rand::seq::SliceRandom;
 use rand::{thread_rng};
 
-pub mod srs;
-pub mod shc;
-
+pub mod rs;
+pub mod hc;
 
 trait TerminationCriterion {
     fn should_terminate(&self) -> bool;
 }
 
 trait NullaryOperator {
-    fn null_apply(&self,
-                  random: &mut ThreadRng) -> Vec<usize>;
+    fn apply(&self, random: &mut ThreadRng) -> Vec<usize>;
 }
 
-trait UnaryOperator1Swap {
-    fn uno_apply(&self, based: &Vec<usize>,
-                 random: &mut ThreadRng) -> Vec<usize>;
+pub trait UnaryOperator {
+    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize>;
 }
 
-trait UnaryOperatorNSwaps {
-    fn uno_apply(&self, based: &Vec<usize>, n: usize,
-                 random: &mut ThreadRng) -> Vec<usize>;
+pub trait UnaryOperator1Swap {
+    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize>;
+}
+
+pub trait UnaryOperatorNSwap {
+    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize>;
 }
 
 trait BinaryOperator {
-    fn bi_apply(&self, based_a: &Vec<usize>, based_b: &Vec<usize>,
+    fn apply(&self, based_a: &Vec<usize>, based_b: &Vec<usize>,
                 random: &mut ThreadRng) -> Vec<usize>;
 }
 
@@ -85,7 +85,7 @@ impl Instance {
             .expect("failed to load the file"));
 
         let mut a: usize=0;
-        let mut b: usize=0;
+        let mut _b: usize=0;
         let mut times: Vec<Vec<usize>> = Vec::new();
         let mut machines: Vec<Vec<usize>> = Vec::new();
         for (i, line) in contents.lines().skip(1)
@@ -94,7 +94,7 @@ impl Instance {
                 let vec: Vec<usize> = line.split_whitespace()
                     .map(|x| x.parse().expect("Not parse the number.")).collect_vec();
                 a = vec[0];
-                b = vec[1];
+                _b = vec[1];
             }
             else if i == 1 || i == a + 2 { continue; }
             else if i < a + 2 {times.push(line.split_whitespace().map(|x|
