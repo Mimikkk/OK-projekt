@@ -10,6 +10,8 @@ def show_gantt(instance: str, file_name: str, title: Optional[str] = None, save_
     :param file_name: solution file PATH location
     :param title: Title of the figure
     :param save_path: If SAVE_PATH is present the Gantt chart will be save to the given SAVE_PATH
+
+    e.g. ./gantt.py ta01 hillclimber_1swap_restarts
     """
     # Read Data
     n: int

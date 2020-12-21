@@ -3,6 +3,12 @@ import sys
 
 
 def create_scatter_plot(instance_name: str, *story_paths: str):
+    """
+    :param instance: Instance Name eg. ta01
+    :param file_name: solution type
+
+    e.g. ./scatter.py ta01 hillclimber_1swap_restarts
+    """
     fig = plt.graph_objs.Figure()
     fig.update_layout(title=f"JSSP - Instance: {instance_name.capitalize()}", legend_title="Algorithms:")
 
