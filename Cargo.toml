@@ -1,0 +1,9 @@
+[package]
+name = "jobshop-python"
+version = "0.1.0"
+authors = ["Mimikkk <Inwazzin@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+itertools = "*"
+rand = "*"

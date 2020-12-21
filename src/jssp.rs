@@ -6,10 +6,11 @@ use std::fs::File;
 use std::rc::Rc;
 use rand::prelude::ThreadRng;
 use rand::seq::SliceRandom;
-use rand::{thread_rng};
+use rand::{thread_rng, Rng};
 
 pub mod rs;
 pub mod hc;
+pub mod ga;
 
 trait TerminationCriterion {
     fn should_terminate(&self) -> bool;
@@ -19,16 +20,37 @@ trait NullaryOperator {
     fn apply(&self, random: &mut ThreadRng) -> Vec<usize>;
 }
 
-pub trait UnaryOperator {
-    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize>;
-}
-
 pub trait UnaryOperator1Swap {
-    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize>;
+    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize>{
+        let mut result = based.clone();
+        let high = based.len();
+        let i: usize = random.gen_range(0, high);
+        let mut j: usize = random.gen_range(0, high);
+        while result[i] == result[j] { j = random.gen_range(0, high) }
+        result.swap(i,j);
+        result
+
+    }
 }
 
 pub trait UnaryOperatorNSwap {
-    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize>;
+    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize> {
+        let mut result = based.clone();
+        let high = based.len();
+        let mut should_flip = true;
+        let mut i: usize;
+        let mut j: usize;
+
+        while should_flip {
+            i = random.gen_range(0, high);
+            j = random.gen_range(0, high);
+            while result[i] == result[j] { j = random.gen_range(0, high) }
+            result.swap(i,j);
+
+            should_flip = random.gen();
+        }
+        result
+    }
 }
 
 trait BinaryOperator {
@@ -165,11 +187,12 @@ impl RepresentationMapping{
         self.job_time.iter_mut().for_each(|x| *x = 0);
         self.job_state.iter_mut().for_each(|x| *x = 0);
         let mut y = CandidateSolution::new(self.machine_time.len(), self.job_time.len());
-        let mut machine: usize;
-        let mut job_step: usize;
 
-        let mut start: usize;
-        let mut end: usize;
+        let mut machine: usize = 0;
+        let mut job_step: usize = 0;
+
+        let mut start: usize = 0;
+        let mut end: usize = 0;
 
         for &job in x.iter() {
             job_step = self.job_state[job] * 2;

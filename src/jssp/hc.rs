@@ -88,34 +88,6 @@ impl NullaryOperator for HillClimber {
     }
 }
 
-impl UnaryOperator1Swap for HillClimber {
-    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize> {
-        let mut result = based.clone();
-        let high = based.len();
-        let i: usize = random.gen_range(0, high);
-        let mut j: usize = random.gen_range(0, high);
-        while result[i] == result[j] { j = random.gen_range(0, high) }
-        result.swap(i,j);
-        result
-    }
-}
+impl UnaryOperator1Swap for HillClimber {}
 
-impl UnaryOperatorNSwap for HillClimber {
-    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize> {
-        let mut result = based.clone();
-        let high = based.len();
-        let mut should_flip = true;
-        let mut i: usize;
-        let mut j: usize;
-
-        while should_flip {
-            i = random.gen_range(0, high);
-            j = random.gen_range(0, high);
-            while result[i] == result[j] { j = random.gen_range(0, high) }
-            result.swap(i,j);
-
-            should_flip = random.gen();
-        }
-        result
-    }
-}
+impl UnaryOperatorNSwap for HillClimber {}
