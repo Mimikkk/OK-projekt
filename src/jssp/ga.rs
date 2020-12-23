@@ -1,5 +1,6 @@
 use crate::jssp::*;
 use rand::Rng;
+use std::mem::replace;
 
 #[derive(Clone)]
 struct Candidate {
@@ -32,34 +33,32 @@ impl Genetic {
             termination_limit,
         }
     }
-    pub fn solve(&mut self, lambda: usize, mi: usize) -> BlackBox {
+    pub fn solve(&mut self, crossover_chance: f64, lambda: usize, mu: usize) -> BlackBox {
         let mut random = &mut thread_rng();
+        let length = lambda + mu;
+        let mut p = (0..length).into_iter().map(|_|
+            Candidate::new(<Self as NullaryOperator>::apply(&self, &mut random),
+                           &mut self.process,
+                           &mut random)).collect_vec();
 
-        let mut p: Vec<Candidate> =
-            vec![Candidate::new(
-                <Self as NullaryOperator>
-                ::apply(&self, random), &mut self.process, random); lambda + mi];
-
-        let mut p_index: i32;
         while !self.should_terminate() {
-            self.termination_counter += 1;
             p.sort_by_key(|x| x.makespan);
-            if self.process.history.is_empty()
-                || self.process.history.last().unwrap() > &p[0].makespan {
-                self.process.update_history(p[0].makespan);
-            }
+            // self.process.update(&p[0].order);
+            let (a, b) = p.split_at_mut(mu);
+            let (mut p1, mut p2): (usize, usize) = (0, random.gen_range(0, mu));
+            a.shuffle(&mut random);
+            p = [a, b].concat();
 
-            let (b, c) = p.split_at_mut(mi);
-            b.shuffle(random);
-            p = [b, c].concat();
-
-            p_index = -1;
-            for i in mi..mi + lambda {
-                p_index = (p_index + 1) % (mi as i32);
-                p[i] =
-                    Candidate::new(
-                        <Self as BinaryOperator>::apply(&self, &p[i].order, &p[p_index as usize].order, random),
-                        &mut self.process, random);
+            for i in mu..length {
+                let new_order =
+                    if random.gen_bool(crossover_chance) {
+                        while p1 == p2 { p2 = random.gen_range(0, mu) }
+                        <Self as BinaryOperator>::apply(&self, &p[p1].order, &p[p2].order, &mut random)
+                    } else {
+                        <Self as UnaryOperatorNSwap>::apply(&self, &p[p1].order, &mut random)
+                    };
+                p[i] = Candidate::new(new_order, &mut self.process, &mut random);
+                p1 = (p1 + 1) % mu;
             }
         }
 
@@ -72,8 +71,10 @@ impl Genetic {
 }
 
 impl TerminationCriterion for Genetic {
-    fn should_terminate(&self) -> bool {
-        return self.termination_counter >= self.termination_limit;
+    fn should_terminate(&mut self) -> bool {
+         println!("{}", self.termination_counter);
+        self.termination_counter += 1;
+        self.termination_counter >= self.termination_limit
     }
 }
 
@@ -89,41 +90,4 @@ impl UnaryOperator1Swap for Genetic {}
 
 impl UnaryOperatorNSwap for Genetic {}
 
-impl BinaryOperator for Genetic {
-    fn apply(&self, based_a: &Vec<usize>, based_b: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize> {
-        let length: usize = based_a.len();
-        let mut visited_a: Vec<bool> = vec![false; length];
-        let mut visited_b: Vec<bool> = vec![false; length];
-        let mut result: Vec<usize> = vec![0; length];
-
-        let mut result_i: usize = 0;
-        let mut a_i: usize = 0;
-        let mut b_i: usize = 0;
-        let mut add: usize = 0;
-        loop {
-            add = if random.gen::<bool>() { based_a[a_i] } else { based_b[b_i] };
-            result[result_i] = add;
-            result_i += 1;
-
-            if result_i >= length { return result; }
-
-            let mut i = a_i;
-            loop {
-                if based_a[i] == add && !visited_a[i] {
-                    visited_a[i] = true;
-                    break; };
-                i += 1
-            }
-            while visited_a[a_i] { a_i += 1 }
-
-            let mut i = b_i;
-            loop {
-                if based_b[i] == add && !visited_b[i] {
-                    visited_b[i] = true;
-                    break; };
-                i += 1
-            }
-            while visited_b[b_i] { b_i += 1 }
-        }
-    }
-}
+impl BinaryOperator for Genetic {}

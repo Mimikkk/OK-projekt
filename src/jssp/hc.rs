@@ -1,5 +1,4 @@
 use crate::jssp::*;
-use rand::Rng;
 
 pub struct HillClimber {
     process: BlackBox,
@@ -47,7 +46,7 @@ impl HillClimber {
                 prev_makespan = self.process.find_makespan(&solution);
                 self.reset_counter = 0;
             }
-            next_order = search_operator(&self, &prev_order, &mut random);;
+            next_order = search_operator(&self, &prev_order, &mut random);
             solution = self.process.mapping.map(&next_order);
             next_makespan = self.process.find_makespan(&solution);
 
@@ -75,7 +74,7 @@ impl HillClimber {
 }
 
 impl TerminationCriterion for HillClimber {
-    fn should_terminate(&self) -> bool {
+    fn should_terminate(&mut self) -> bool {
         return self.termination_counter >= self.termination_limit
     }
 }

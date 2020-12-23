@@ -51,7 +51,7 @@ impl RandomSample {
 }
 
 impl TerminationCriterion for RandomSample {
-    fn should_terminate(&self) -> bool {
+    fn should_terminate(&mut self) -> bool {
         return self.termination_counter >= self.termination_limit
     }
 }

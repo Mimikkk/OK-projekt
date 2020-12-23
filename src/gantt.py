@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 from typing import *
 import sys
 
-
 def show_gantt(instance: str, file_name: str, title: Optional[str] = None, save_path: Optional[str] = None):
     """
     Function which produces the Gantt Chart and displays it and/or saves it
