@@ -9,8 +9,8 @@ struct Candidate {
 }
 
 impl Candidate {
-    fn new(mut order: Vec<usize>, process: &mut BlackBox, mut random: &mut ThreadRng) -> Self {
-        order.shuffle(&mut random);
+    fn new(mut order: &Vec<usize>, process: &mut BlackBox) -> Self {
+        let mut order = order.clone();
         let sol = process.mapping.map(&order);
         let makespan = process.find_makespan(&sol);
 
@@ -37,13 +37,13 @@ impl Genetic {
         let mut random = &mut thread_rng();
         let length = lambda + mu;
         let mut p = (0..length).into_iter().map(|_|
-            Candidate::new(<Self as NullaryOperator>::apply(&self, &mut random),
-                           &mut self.process,
-                           &mut random)).collect_vec();
+            Candidate::new(&<Self as NullaryOperator>::apply(&self, &mut random),
+                           &mut self.process)).collect_vec();
 
         while !self.should_terminate() {
             p.sort_by_key(|x| x.makespan);
-            // self.process.update(&p[0].order);
+            println!("{}", p[0].makespan);
+            self.process.update(&p[0].order);
             let (a, b) = p.split_at_mut(mu);
             let (mut p1, mut p2): (usize, usize) = (0, random.gen_range(0, mu));
             a.shuffle(&mut random);
@@ -57,7 +57,7 @@ impl Genetic {
                     } else {
                         <Self as UnaryOperatorNSwap>::apply(&self, &p[p1].order, &mut random)
                     };
-                p[i] = Candidate::new(new_order, &mut self.process, &mut random);
+                p[i] = Candidate::new(&new_order, &mut self.process);
                 p1 = (p1 + 1) % mu;
             }
         }
@@ -72,7 +72,6 @@ impl Genetic {
 
 impl TerminationCriterion for Genetic {
     fn should_terminate(&mut self) -> bool {
-         println!("{}", self.termination_counter);
         self.termination_counter += 1;
         self.termination_counter >= self.termination_limit
     }
