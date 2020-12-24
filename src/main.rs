@@ -3,7 +3,7 @@ pub mod jssp;
 use jssp::rs::RandomSample;
 use jssp::hc::HillClimber;
 use jssp::Instance;
-use crate::jssp::ga::Genetic;
+use jssp::ga::Genetic;
 
 fn main() {
     let instance = Instance::new("ta01", "taillard");
