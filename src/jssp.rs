@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
 use itertools::{Itertools, zip};
 use std::cmp::{max, min};
 use std::io::{BufReader, BufRead, Write};
@@ -7,53 +9,74 @@ use std::rc::Rc;
 use rand::prelude::ThreadRng;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
+use crate::jssp::can::Candidate;
 
 pub mod rs;
 pub mod hc;
 pub mod ga;
+pub mod can;
 
-trait TerminationCriterion {
+pub trait TerminationCriterion {
     fn should_terminate(&mut self) -> bool;
 }
 
-trait NullaryOperator {
-    fn apply(&self, random: &mut ThreadRng) -> Vec<usize>;
+pub trait NullaryOperator {
+    fn apply(&mut self) -> Candidate;
 }
 
 pub trait UnaryOperator1Swap {
-    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize> {
-        let mut result = based.clone();
-        let high = based.len();
-        let i: usize = random.gen_range(0, high);
-        let mut j: usize = random.gen_range(0, high);
-        while result[i] == result[j] { j = random.gen_range(0, high) }
-        result.swap(i, j);
-        result
-    }
+    fn apply(&mut self, based: &Candidate) -> Candidate;
 }
 
 pub trait UnaryOperatorNSwap {
-    fn apply(&self, based: &Vec<usize>, random: &mut ThreadRng) -> Vec<usize> {
-        let mut result = based.clone();
-        let high = based.len();
-
-        let mut should_flip = true;
-        while should_flip {
-            let i = random.gen_range(0, high);
-            let mut j = random.gen_range(0, high);
-            while result[i] == result[j] { j = random.gen_range(0, high) }
-            result.swap(i, j);
-
-            should_flip = random.gen();
-        }
-        result
-    }
+    fn apply(&mut self, based: &Candidate) -> Candidate;
 }
 
 pub trait BinaryOperator {
-    fn apply(&self, based_a: &Vec<usize>, based_b: &Vec<usize>,
-             random: &mut ThreadRng) -> Vec<usize> {
-        let length: usize = based_a.len();
+    fn apply(&mut self, based_a: &Candidate, based_b: &Candidate) -> Candidate;
+}
+
+impl NullaryOperator for BlackBox {
+    fn apply(&mut self) -> Candidate {
+        let mut vec = self.search_space.create();
+        vec.shuffle(&mut self.random);
+        Candidate::new(&vec, self)
+    }
+}
+
+impl UnaryOperator1Swap for BlackBox {
+    fn apply(&mut self, based: &Candidate) -> Candidate {
+        let mut result = based.order.clone();
+        let high = based.order.len();
+        let i: usize = self.random.gen_range(0, high);
+        let mut j: usize = self.random.gen_range(0, high);
+        while result[i] == result[j] { j = self.random.gen_range(0, high) }
+        result.swap(i, j);
+        Candidate::new(&result, self)
+    }
+}
+
+impl UnaryOperatorNSwap for BlackBox {
+    fn apply(&mut self, based: &Candidate) -> Candidate {
+        let mut result = based.order.clone();
+        let high = based.order.len();
+
+        let mut should_flip = true;
+        while should_flip {
+            let i = self.random.gen_range(0, high);
+            let mut j = self.random.gen_range(0, high);
+            while result[i] == result[j] { j = self.random.gen_range(0, high) }
+            result.swap(i, j);
+
+            should_flip = self.random.gen();
+        }
+        Candidate::new(&result, self)
+    }
+}
+
+impl BinaryOperator for BlackBox {
+    fn apply(&mut self, based_a: &Candidate, based_b: &Candidate) -> Candidate {
+        let length: usize = based_a.order.len();
 
         let mut visited_a: Vec<bool> = vec![false; length];
         let mut visited_b: Vec<bool> = vec![false; length];
@@ -65,15 +88,15 @@ pub trait BinaryOperator {
         let mut b_i: usize = 0;
 
         loop {
-            let add = if random.gen::<bool>() { based_a[a_i] } else { based_b[b_i] };
+            let add = if self.random.gen::<bool>() { based_a.order[a_i] } else { based_b.order[b_i] };
             result[result_i] = add;
             result_i += 1;
 
-            if result_i >= length { return result; }
+            if result_i >= length { return Candidate::new(&result, self); }
 
             let mut i = a_i;
             loop {
-                if based_a[i] == add && !visited_a[i] {
+                if based_a.order[i] == add && !visited_a[i] {
                     visited_a[i] = true;
                     break;
                 };
@@ -83,7 +106,7 @@ pub trait BinaryOperator {
 
             let mut i = b_i;
             loop {
-                if based_b[i] == add && !visited_b[i] {
+                if based_b.order[i] == add && !visited_b[i] {
                     visited_b[i] = true;
                     break;
                 };
@@ -168,11 +191,11 @@ impl Instance {
 }
 
 #[derive(Clone)]
-pub struct CandidateSolution {
+pub struct CandidateMapping {
     pub schedule: Vec<Vec<usize>>,
 }
 
-impl CandidateSolution {
+impl CandidateMapping {
     fn new(m: usize, n: usize) -> Self {
         Self { schedule: vec![vec![0; 3 * n]; m] }
     }
@@ -218,18 +241,18 @@ impl RepresentationMapping {
         }
     }
 
-    fn map(&mut self, x: &Vec<usize>) -> CandidateSolution {
+    fn map(&mut self, x: &Vec<usize>) -> CandidateMapping {
         self.machine_state.iter_mut().for_each(|x| *x = 0);
         self.machine_time.iter_mut().for_each(|x| *x = 0);
         self.job_time.iter_mut().for_each(|x| *x = 0);
         self.job_state.iter_mut().for_each(|x| *x = 0);
-        let mut y = CandidateSolution::new(self.machine_time.len(), self.job_time.len());
+        let mut y = CandidateMapping::new(self.machine_time.len(), self.job_time.len());
 
-        let mut machine: usize = 0;
-        let mut job_step: usize = 0;
+        let mut machine: usize;
+        let mut job_step: usize;
 
-        let mut start: usize = 0;
-        let mut end: usize = 0;
+        let mut start: usize;
+        let mut end: usize;
 
         for &job in x.iter() {
             job_step = self.job_state[job] * 2;
@@ -252,33 +275,13 @@ impl RepresentationMapping {
 }
 
 #[derive(Clone)]
-struct SolutionSpace {
-    instance: Rc<Instance>,
-}
-
-impl SolutionSpace {
-    fn new(instance: Rc<Instance>) -> Self {
-        Self { instance }
-    }
-
-    fn create(&self) -> CandidateSolution {
-        CandidateSolution::new(self.instance.m, self.instance.n)
-    }
-
-    fn copy(from: CandidateSolution, mut to: CandidateSolution) where Self: Sized {
-        to.schedule = from.schedule.clone();
-    }
-}
-
-#[derive(Clone)]
 pub struct BlackBox {
     instance: Rc<Instance>,
     search_space: SearchSpace,
     mapping: RepresentationMapping,
+    random: ThreadRng,
 
-    pub best_solution: CandidateSolution,
-    pub best_makespan: usize,
-    pub best_order: Vec<usize>,
+    pub best_candidate: Candidate,
     pub history: Vec<usize>,
 
     pub lower_bound: usize,
@@ -286,42 +289,37 @@ pub struct BlackBox {
 }
 
 impl BlackBox {
-    fn new(instance: Instance) -> Self {
-        let p_instance = Rc::new(instance);
-        let search_space = SearchSpace::new(Rc::clone(&p_instance));
-        let mut mapping = RepresentationMapping::new(Rc::clone(&p_instance));
-        let best_order = search_space.create();
-        let best_solution = mapping.map(&best_order);
+    fn new(instance: &Instance) -> Self {
+        let p_instance = Rc::new(instance.clone());
 
         let mut bb = Self {
+            search_space: SearchSpace::new(Rc::clone(&p_instance)),
+            mapping: RepresentationMapping::new(Rc::clone(&p_instance)),
             instance: p_instance,
-            search_space,
-            mapping,
 
-            best_solution,
-            best_makespan: usize::MAX,
-            best_order: Vec::new(),
+            random: thread_rng(),
+            best_candidate: Candidate { order: vec![], makespan: 0 },
             history: Vec::new(),
 
             lower_bound: 0,
             upper_bound: 0,
         };
+
+        bb.best_candidate = <Self as NullaryOperator>::apply(&mut bb);
         bb.lower_bound = bb.find_lower_bound();
         bb.upper_bound = bb.find_upper_bound();
         bb
     }
-    fn update(&mut self, order: &Vec<usize>) {
-        self.best_order = order.clone();
-        self.best_solution = self.mapping.map(&order);
-        self.best_makespan = self.find_makespan(&self.best_solution);
-        self.update_history(self.best_makespan);
+    fn update(&mut self, candidate: &Candidate) {
+        self.best_candidate = candidate.clone();
+        self.update_history(candidate);
     }
 
-    fn update_history(&mut self, makespan: usize) {
-        self.history.push(makespan);
+    fn update_history(&mut self, candidate: &Candidate) {
+        self.history.push(candidate.makespan);
     }
 
-    fn save(&self, name: &str) -> std::io::Result<()> {
+    fn save(&mut self, name: &str) -> std::io::Result<()> {
         self.save_schedule(name)?;
         self.save_history(name)?;
         Ok(())
@@ -337,14 +335,14 @@ impl BlackBox {
         Ok(())
     }
 
-    fn save_schedule(&self, name: &str) -> std::io::Result<()> {
+    fn save_schedule(&mut self, name: &str) -> std::io::Result<()> {
         let s = format!("solutions\\{}_{}_solution.txt", self.instance.id, name);
         let path = Path::new(s.as_str());
         let mut file = File::create(path)?;
 
         writeln!(file, "{} {}", self.instance.n, self.instance.m)?;
-        writeln!(file, "{}", self.best_makespan)?;
-        for line in self.best_solution.schedule.iter() {
+        writeln!(file, "{}", self.best_candidate.makespan)?;
+        for line in self.mapping.map(&self.best_candidate.order).schedule.iter() {
             for i in line { write!(file, "{} ", i)? }
             write!(file, "\n")?;
         }
@@ -352,7 +350,7 @@ impl BlackBox {
         Ok(())
     }
 
-    fn find_makespan(&self, y: &CandidateSolution) -> usize {
+    fn find_makespan(&self, y: &CandidateMapping) -> usize {
         y.schedule.iter().map(|x| *x.last().unwrap()).max().expect("Failed to find makespan.")
     }
 

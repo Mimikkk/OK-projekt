@@ -1,22 +1,5 @@
 use crate::jssp::*;
-use rand::Rng;
-use std::mem::replace;
-
-#[derive(Clone)]
-struct Candidate {
-    order: Vec<usize>,
-    makespan: usize,
-}
-
-impl Candidate {
-    fn new(mut order: &Vec<usize>, process: &mut BlackBox) -> Self {
-        let mut order = order.clone();
-        let sol = process.mapping.map(&order);
-        let makespan = process.find_makespan(&sol);
-
-        Self { order, makespan }
-    }
-}
+use crate::jssp::can::Candidate;
 
 pub struct Genetic {
     process: BlackBox,
@@ -27,45 +10,39 @@ pub struct Genetic {
 impl Genetic {
     pub fn new(instance: &Instance, termination_limit: usize) -> Self {
         Self {
-            process: BlackBox::new(instance.clone()),
-
+            process: BlackBox::new(instance),
             termination_counter: 0,
             termination_limit,
         }
     }
-    pub fn solve(&mut self, crossover_chance: f64, lambda: usize, mu: usize) -> BlackBox {
-        let mut random = &mut thread_rng();
-        let length = lambda + mu;
-        let mut p = (0..length).into_iter().map(|_|
-            Candidate::new(&<Self as NullaryOperator>::apply(&self, &mut random),
-                           &mut self.process)).collect_vec();
+    pub fn solve(&mut self, crossover_chance: f64, mu: usize, lambda: usize) -> BlackBox {
+        let length = mu + lambda;
+        let mut p: Vec<Candidate> = (0..length).into_iter().map(|_|
+            <BlackBox as NullaryOperator>::apply(&mut self.process)).collect_vec();
 
         while !self.should_terminate() {
             p.sort_by_key(|x| x.makespan);
-            println!("{}", p[0].makespan);
-            self.process.update(&p[0].order);
+            self.process.update_history(&p[0]);
             let (a, b) = p.split_at_mut(mu);
-            let (mut p1, mut p2): (usize, usize) = (0, random.gen_range(0, mu));
-            a.shuffle(&mut random);
+            a.shuffle(&mut self.process.random);
             p = [a, b].concat();
 
+            let mut p1 = 0;
             for i in mu..length {
-                let new_order =
-                    if random.gen_bool(crossover_chance) {
-                        while p1 == p2 { p2 = random.gen_range(0, mu) }
-                        <Self as BinaryOperator>::apply(&self, &p[p1].order, &p[p2].order, &mut random)
-                    } else {
-                        <Self as UnaryOperatorNSwap>::apply(&self, &p[p1].order, &mut random)
-                    };
-                p[i] = Candidate::new(&new_order, &mut self.process);
+                p[i] = if self.process.random.gen_bool(crossover_chance) {
+                    let mut p2 = self.process.random.gen_range(0, mu);
+                    while p1 == p2 { p2 = self.process.random.gen_range(0, mu) }
+                    <BlackBox as BinaryOperator>::apply(&mut self.process, &p[p1], &p[p2])
+                } else {
+                    <BlackBox as UnaryOperatorNSwap>::apply(&mut self.process, &p[p1])
+                };
                 p1 = (p1 + 1) % mu;
             }
         }
 
         p.sort_by_key(|x| x.makespan);
-        self.process.update(&p[0].order);
-        let name = format!("genetic");
-        self.process.save(name.as_str()).expect("Failed to save.");
+        self.process.update(&p[0]);
+        self.process.save("genetic").expect("Failed to save.");
         self.process.clone()
     }
 }
@@ -76,17 +53,3 @@ impl TerminationCriterion for Genetic {
         self.termination_counter >= self.termination_limit
     }
 }
-
-impl NullaryOperator for Genetic {
-    fn apply(&self, random: &mut ThreadRng) -> Vec<usize> {
-        let mut vec = self.process.search_space.create();
-        vec.shuffle(random);
-        vec
-    }
-}
-
-impl UnaryOperator1Swap for Genetic {}
-
-impl UnaryOperatorNSwap for Genetic {}
-
-impl BinaryOperator for Genetic {}
