@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
+
 use itertools::{Itertools, zip};
 use std::cmp::{max, min};
 use std::io::{BufReader, BufRead, Write};
@@ -15,6 +16,7 @@ pub mod rs;
 pub mod hc;
 pub mod ga;
 pub mod can;
+pub mod tabu;
 
 pub trait TerminationCriterion {
     fn should_terminate(&mut self) -> bool;
@@ -47,9 +49,9 @@ impl NullaryOperator for BlackBox {
 impl UnaryOperator1Swap for BlackBox {
     fn apply(&mut self, based: &Candidate) -> Candidate {
         let mut result = based.order.clone();
+
         let high = based.order.len();
-        let i: usize = self.random.gen_range(0, high);
-        let mut j: usize = self.random.gen_range(0, high);
+        let (i, mut j) = (self.random.gen_range(0, high), self.random.gen_range(0, high));
         while result[i] == result[j] { j = self.random.gen_range(0, high) }
         result.swap(i, j);
         Candidate::new(&result, self)
@@ -63,8 +65,7 @@ impl UnaryOperatorNSwap for BlackBox {
 
         let mut should_flip = true;
         while should_flip {
-            let i = self.random.gen_range(0, high);
-            let mut j = self.random.gen_range(0, high);
+            let (i, mut j) = (self.random.gen_range(0, high), self.random.gen_range(0, high));
             while result[i] == result[j] { j = self.random.gen_range(0, high) }
             result.swap(i, j);
 
@@ -204,20 +205,15 @@ impl CandidateMapping {
 #[derive(Clone)]
 struct SearchSpace {
     instance: Rc<Instance>,
-    m_length: usize,
 }
 
 impl SearchSpace {
     fn new(instance: Rc<Instance>) -> Self {
-        Self { instance: Rc::clone(&instance), m_length: instance.m }
+        Self { instance: Rc::clone(&instance) }
     }
 
     fn create(&self) -> Vec<usize> {
         (0..self.instance.n).map(|i| vec![i; self.instance.m]).flatten().collect()
-    }
-
-    fn copy(from: Vec<usize>, mut _to: Vec<usize>) {
-        _to = from.clone();
     }
 }
 
@@ -246,7 +242,8 @@ impl RepresentationMapping {
         self.machine_time.iter_mut().for_each(|x| *x = 0);
         self.job_time.iter_mut().for_each(|x| *x = 0);
         self.job_state.iter_mut().for_each(|x| *x = 0);
-        let mut y = CandidateMapping::new(self.machine_time.len(), self.job_time.len());
+        let mut y =
+            CandidateMapping::new(self.machine_time.len(), self.job_time.len());
 
         let mut machine: usize;
         let mut job_step: usize;
@@ -316,7 +313,14 @@ impl BlackBox {
     }
 
     fn update_history(&mut self, candidate: &Candidate) {
-        self.history.push(candidate.makespan);
+        match self.history.last() {
+            None => { self.history.push(candidate.makespan); }
+            Some(&makespan) => {
+                if makespan > candidate.makespan {
+                    self.history.push(candidate.makespan);
+                }
+            }
+        }
     }
 
     fn save(&mut self, name: &str) -> std::io::Result<()> {

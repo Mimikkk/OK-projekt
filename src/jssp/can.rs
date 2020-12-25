@@ -20,6 +20,12 @@ impl PartialOrd for Candidate {
     }
 }
 
+impl Ord for Candidate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.cmp(&self)
+    }
+}
+
 impl PartialEq for Candidate {
     fn eq(&self, other: &Self) -> bool {
         self.order == other.order
