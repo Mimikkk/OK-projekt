@@ -3,19 +3,14 @@ use crate::jssp::*;
 pub struct HillClimber {
     process: BlackBox,
 
-    termination_counter: usize,
-    termination_limit: usize,
-
     reset_threshold: usize,
     reset_counter: usize,
 }
 
 impl HillClimber {
-    pub fn new(instance: &Instance, termination_limit: usize, reset_threshold: usize) -> Self {
+    pub fn new(instance: &Instance, reset_threshold: usize) -> Self {
         Self {
             process: BlackBox::new(instance),
-            termination_counter: 0,
-            termination_limit,
 
             reset_threshold,
             reset_counter: 0,
@@ -34,7 +29,7 @@ impl HillClimber {
             _ => panic!("Unsupported operator"),
         };
 
-        while !self.should_terminate() {
+        while !<BlackBox as TerminationCriterion<Counter>>::should_terminate(&mut self.process) {
             if self.should_reset() {
                 prev_candidate = <BlackBox as NullaryOperator>::apply(&mut self.process);
                 self.reset_counter = 0;
@@ -49,7 +44,7 @@ impl HillClimber {
                 best_candidate = prev_candidate.clone();
                 self.process.update_history(&best_candidate);
                 self.reset_counter = 0;
-            } else { self.reset_counter += 1; }
+            }
         }
 
         self.process.update(&best_candidate);
@@ -59,13 +54,7 @@ impl HillClimber {
     }
 
     fn should_reset(&mut self) -> bool {
+        self.reset_counter += 1;
         self.reset_counter >= self.reset_threshold
-    }
-}
-
-impl TerminationCriterion for HillClimber {
-    fn should_terminate(&mut self) -> bool {
-        self.termination_counter += 1;
-        return self.termination_counter >= self.termination_limit;
     }
 }

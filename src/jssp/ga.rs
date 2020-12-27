@@ -4,16 +4,12 @@ use std::mem::swap;
 
 pub struct Genetic {
     process: BlackBox,
-    termination_counter: usize,
-    termination_limit: usize,
 }
 
 impl Genetic {
-    pub fn new(instance: &Instance, termination_limit: usize) -> Self {
+    pub fn new(instance: &Instance) -> Self {
         Self {
             process: BlackBox::new(instance),
-            termination_counter: 0,
-            termination_limit,
         }
     }
     fn find_clear_length(&mut self, p: &mut Vec<Candidate>, mu: usize) -> usize {
@@ -38,8 +34,7 @@ impl Genetic {
         let mut candidates: Vec<Candidate> = (0..length).into_iter().map(|_|
             <BlackBox as NullaryOperator>::apply(&mut self.process)).collect();
 
-        while !self.should_terminate() {
-            println!("{}", self.termination_counter);
+        while !<BlackBox as TerminationCriterion<Counter>>::should_terminate(&mut self.process) {
             candidates.sort_by_key(|x| x.makespan);
             self.process.update_history(&candidates[0]);
 
@@ -64,12 +59,5 @@ impl Genetic {
         self.process.update(&candidates[0]);
         self.process.save("genetic").expect("Failed to save.");
         self.process.clone()
-    }
-}
-
-impl TerminationCriterion for Genetic {
-    fn should_terminate(&mut self) -> bool {
-        self.termination_counter += 1;
-        self.termination_counter >= self.termination_limit
     }
 }

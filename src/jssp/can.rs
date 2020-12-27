@@ -1,15 +1,15 @@
-use crate::jssp::BlackBox;
+use crate::jssp::{BlackBox, RepresentationMapping};
 use std::cmp::{Ordering};
 
 #[derive(Clone)]
 pub struct Candidate {
     pub order: Vec<usize>,
-    pub makespan: usize,
+    pub makespan: usize
 }
 
 impl Candidate {
     pub fn new(mut order: &Vec<usize>, process: &mut BlackBox) -> Self {
-        let sol = process.mapping.map(&order);
+        let sol = process.map(&order);
         Self { order: order.clone(), makespan: process.find_makespan(&sol) }
     }
 }
@@ -22,7 +22,7 @@ impl PartialOrd for Candidate {
 
 impl Ord for Candidate {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.cmp(&self)
+        self.makespan.cmp(&other.makespan)
     }
 }
 

@@ -12,13 +12,17 @@ use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use crate::jssp::can::Candidate;
 
+pub mod can;
 pub mod rs;
 pub mod hc;
 pub mod ga;
-pub mod can;
-pub mod tabu;
+pub mod sa;
 
-pub trait TerminationCriterion {
+pub struct Counter;
+
+pub struct Time;
+
+pub trait TerminationCriterion<T> {
     fn should_terminate(&mut self) -> bool;
 }
 
@@ -40,7 +44,7 @@ pub trait BinaryOperator {
 
 impl NullaryOperator for BlackBox {
     fn apply(&mut self) -> Candidate {
-        let mut vec = self.search_space.create();
+        let mut vec = self.create();
         vec.shuffle(&mut self.random);
         Candidate::new(&vec, self)
     }
@@ -124,11 +128,13 @@ pub struct Instance {
     id: String,
     m: usize,
     n: usize,
+    termination_limit: usize,
+    is_timed: bool,
 }
 
 impl Instance {
-    pub fn new(instance_name: &str, instance_type: &str) -> Self {
-        let instance_data: Vec<Vec<usize>> = match instance_type.to_lowercase().as_str() {
+    pub fn new(instance_name: &str, instance_type: &str, termination_limit: usize, is_timed: bool) -> Self {
+        let instance_data = match instance_type.to_lowercase().as_str() {
             "orlib" => { Self::read_orlib(instance_name.to_string()) }
             "taillard" => { Self::read_taillard(instance_name.to_string()) }
             _ => { panic!("Wrong instance type {}", instance_type) }
@@ -137,9 +143,11 @@ impl Instance {
 
         Self {
             n: instance_data.len(),
+            termination_limit,
             m: instance_data[0].len() / 2,
             jobs: Rc::new(instance_data),
             id: instance_name.to_string(),
+            is_timed,
         }
     }
 
@@ -191,7 +199,6 @@ impl Instance {
     }
 }
 
-#[derive(Clone)]
 pub struct CandidateMapping {
     pub schedule: Vec<Vec<usize>>,
 }
@@ -202,70 +209,45 @@ impl CandidateMapping {
     }
 }
 
-#[derive(Clone)]
-struct SearchSpace {
-    instance: Rc<Instance>,
-}
+trait SearchSpace { fn create(&self) -> Vec<usize>; }
 
-impl SearchSpace {
-    fn new(instance: Rc<Instance>) -> Self {
-        Self { instance: Rc::clone(&instance) }
-    }
-
+impl SearchSpace for BlackBox {
     fn create(&self) -> Vec<usize> {
         (0..self.instance.n).map(|i| vec![i; self.instance.m]).flatten().collect()
     }
 }
 
-#[derive(Clone)]
-struct RepresentationMapping {
-    job_time: Vec<usize>,
-    job_state: Vec<usize>,
-    machine_time: Vec<usize>,
-    machine_state: Vec<usize>,
-    jobs: Rc<Vec<Vec<usize>>>,
+trait RepresentationMapping {
+    fn map(&self, order: &Vec<usize>) -> CandidateMapping;
 }
 
-impl RepresentationMapping {
-    fn new(instance: Rc<Instance>) -> Self {
-        Self {
-            job_time: vec![0; instance.n],
-            job_state: vec![0; instance.n],
-            machine_time: vec![0; instance.m],
-            machine_state: vec![0; instance.m],
-            jobs: Rc::clone(&instance.jobs),
-        }
-    }
+impl RepresentationMapping for BlackBox {
+    fn map(&self, order: &Vec<usize>) -> CandidateMapping {
+        let mut machine_state = vec![0; self.instance.n];
+        let mut machine_time = vec![0; self.instance.n];
+        let mut job_state = vec![0; self.instance.m];
+        let mut job_time = vec![0; self.instance.m];
 
-    fn map(&mut self, x: &Vec<usize>) -> CandidateMapping {
-        self.machine_state.iter_mut().for_each(|x| *x = 0);
-        self.machine_time.iter_mut().for_each(|x| *x = 0);
-        self.job_time.iter_mut().for_each(|x| *x = 0);
-        self.job_state.iter_mut().for_each(|x| *x = 0);
-        let mut y =
-            CandidateMapping::new(self.machine_time.len(), self.job_time.len());
+        let jobs = self.instance.jobs.clone();
+        let mut y = CandidateMapping::new(self.instance.n, self.instance.m);
 
-        let mut machine: usize;
-        let mut job_step: usize;
+        let (mut machine, mut job_step): (usize, usize);
+        let (mut start, mut end): (usize, usize);
+        for &job in order.iter() {
+            job_step = job_state[job] * 2;
+            machine = jobs[job][job_step];
+            job_state[job] += 1;
 
-        let mut start: usize;
-        let mut end: usize;
+            start = max(machine_time[machine], job_time[job]);
+            end = start + jobs[job][job_step + 1];
 
-        for &job in x.iter() {
-            job_step = self.job_state[job] * 2;
-            machine = self.jobs[job][job_step];
-            self.job_state[job] += 1;
+            machine_time[machine] = end;
+            job_time[job] = end;
 
-            start = max(self.machine_time[machine], self.job_time[job]);
-            end = start + self.jobs[job][job_step + 1];
-
-            self.machine_time[machine] = end;
-            self.job_time[job] = end;
-
-            y.schedule[machine][self.machine_state[machine]] = job;
-            y.schedule[machine][self.machine_state[machine] + 1] = start;
-            y.schedule[machine][self.machine_state[machine] + 2] = end;
-            self.machine_state[machine] += 3;
+            y.schedule[machine][machine_state[machine]] = job;
+            y.schedule[machine][machine_state[machine] + 1] = start;
+            y.schedule[machine][machine_state[machine] + 2] = end;
+            machine_state[machine] += 3;
         }
         y
     }
@@ -274,8 +256,9 @@ impl RepresentationMapping {
 #[derive(Clone)]
 pub struct BlackBox {
     instance: Rc<Instance>,
-    search_space: SearchSpace,
-    mapping: RepresentationMapping,
+
+    termination_counter: usize,
+    timer: std::time::Instant,
     random: ThreadRng,
 
     pub best_candidate: Candidate,
@@ -283,16 +266,34 @@ pub struct BlackBox {
 
     pub lower_bound: usize,
     pub upper_bound: usize,
+    should_terminate: fn(&mut Self) -> bool,
+}
+
+impl TerminationCriterion<Counter> for BlackBox {
+    fn should_terminate(&mut self) -> bool {
+        self.termination_counter += 1;
+        self.termination_counter >= self.instance.termination_limit
+    }
+}
+
+impl TerminationCriterion<Time> for BlackBox {
+    fn should_terminate(&mut self) -> bool {
+        self.timer.elapsed().as_secs() as usize >= self.instance.termination_limit
+    }
 }
 
 impl BlackBox {
     fn new(instance: &Instance) -> Self {
         let p_instance = Rc::new(instance.clone());
 
+        let should_terminate: fn(&mut Self) -> bool = match instance.is_timed {
+            true => <Self as TerminationCriterion<Time>>::should_terminate,
+            false => <Self as TerminationCriterion<Counter>>::should_terminate,
+        };
+
         let mut bb = Self {
-            search_space: SearchSpace::new(Rc::clone(&p_instance)),
-            mapping: RepresentationMapping::new(Rc::clone(&p_instance)),
             instance: p_instance,
+            should_terminate,
 
             random: thread_rng(),
             best_candidate: Candidate { order: vec![], makespan: 0 },
@@ -300,6 +301,9 @@ impl BlackBox {
 
             lower_bound: 0,
             upper_bound: 0,
+
+            termination_counter: 0,
+            timer: std::time::Instant::now(),
         };
 
         bb.best_candidate = <Self as NullaryOperator>::apply(&mut bb);
@@ -316,9 +320,7 @@ impl BlackBox {
         match self.history.last() {
             None => { self.history.push(candidate.makespan); }
             Some(&makespan) => {
-                if makespan > candidate.makespan {
-                    self.history.push(candidate.makespan);
-                }
+                if makespan > candidate.makespan { self.history.push(candidate.makespan); }
             }
         }
     }
@@ -346,7 +348,7 @@ impl BlackBox {
 
         writeln!(file, "{} {}", self.instance.n, self.instance.m)?;
         writeln!(file, "{}", self.best_candidate.makespan)?;
-        for line in self.mapping.map(&self.best_candidate.order).schedule.iter() {
+        for line in self.map(&self.best_candidate.order).schedule.iter() {
             for i in line { write!(file, "{} ", i)? }
             write!(file, "\n")?;
         }

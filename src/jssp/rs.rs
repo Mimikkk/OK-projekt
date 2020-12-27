@@ -1,26 +1,19 @@
 use crate::jssp::*;
 
-pub struct RandomSample {
-    process: BlackBox,
-
-    termination_counter: usize,
-    termination_limit: usize,
-}
+pub struct RandomSample { process: BlackBox }
 
 impl RandomSample {
-    pub fn new(instance: &Instance, termination_limit: usize) -> Self {
+    pub fn new(instance: &Instance) -> Self {
         Self {
             process: BlackBox::new(instance),
-            termination_counter: 0,
-            termination_limit,
         }
     }
 
     pub fn solve(&mut self) -> BlackBox {
+        println!("aa");
         let mut solution: Candidate = <BlackBox as NullaryOperator>::apply(&mut self.process);
         let mut best_solution = solution.clone();
-
-        while !self.should_terminate() {
+        while !(self.process.should_terminate)(&mut self.process) {
             solution = <BlackBox as NullaryOperator>::apply(&mut self.process);
 
             if solution > best_solution {
@@ -32,12 +25,5 @@ impl RandomSample {
         self.process.update(&best_solution);
         self.process.save("random_sample").expect("Failed to Save.");
         self.process.clone()
-    }
-}
-
-impl TerminationCriterion for RandomSample {
-    fn should_terminate(&mut self) -> bool {
-        self.termination_counter += 1;
-        return self.termination_counter >= self.termination_limit;
     }
 }
