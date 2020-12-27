@@ -21,14 +21,15 @@ impl SimulatedAnnealing {
         let mut next: Candidate;
 
         let temperature_op: fn(&Self) -> f64 = match temperature_operator {
-            "exponential" => <Self as ExponentialTemperatureSchedule>::temperature,
-            "logarithmic" => <Self as LogarithmicTemperatureSchedule>::temperature,
+            "exponential" => <Self as TemperatureSchedule<Exponential>>::temperature,
+            "logarithmic" => <Self as TemperatureSchedule<Logarithmic>>::temperature,
             _ => panic!("Unsupported temperature operator"),
         };
 
         while !(self.process.should_terminate)(&mut self.process) {
             next = <BlackBox as UnaryOperatorNSwap>::apply(&mut self.process, &curr);
-            if next.makespan <= curr.makespan || self.process.random.gen_bool(((curr.makespan as i32 - next.makespan as i32) as f64
+            if next.makespan <= curr.makespan
+                || self.process.random.gen_bool(((curr.makespan as i32 - next.makespan as i32) as f64
                 / temperature_op(&self)).exp()) { curr = next; }
 
             if curr > best_solution {
@@ -44,21 +45,18 @@ impl SimulatedAnnealing {
     }
 }
 
-trait LogarithmicTemperatureSchedule {
-    fn temperature(&self) -> f64;
-}
 
-trait ExponentialTemperatureSchedule {
-    fn temperature(&self) -> f64;
-}
+struct Exponential;
+struct Logarithmic;
+trait TemperatureSchedule<T> { fn temperature(&self) -> f64; }
 
-impl ExponentialTemperatureSchedule for SimulatedAnnealing {
+impl TemperatureSchedule<Exponential> for SimulatedAnnealing {
     fn temperature(&self) -> f64 {
         self.temperature_start * (1f64 - self.annealing_speed).powi(self.process.termination_counter as i32 - 1)
     }
 }
 
-impl LogarithmicTemperatureSchedule for SimulatedAnnealing {
+impl TemperatureSchedule<Logarithmic> for SimulatedAnnealing {
     fn temperature(&self) -> f64 {
         self.temperature_start / ((self.process.termination_counter - 1) as f64 * self.annealing_speed + 1f64.exp()).ln()
     }

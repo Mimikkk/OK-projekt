@@ -67,13 +67,12 @@ impl UnaryOperatorNSwap for BlackBox {
         let mut result = based.order.clone();
         let high = based.order.len();
 
-        let mut should_flip = true;
-        while should_flip {
+        loop {
             let (i, mut j) = (self.random.gen_range(0, high), self.random.gen_range(0, high));
             while result[i] == result[j] { j = self.random.gen_range(0, high) }
             result.swap(i, j);
 
-            should_flip = self.random.gen();
+            if self.random.gen() { break; }
         }
         Candidate::new(&result, self)
     }
@@ -199,9 +198,7 @@ impl Instance {
     }
 }
 
-pub struct CandidateMapping {
-    pub schedule: Vec<Vec<usize>>,
-}
+pub struct CandidateMapping { pub schedule: Vec<Vec<usize>> }
 
 impl CandidateMapping {
     fn new(m: usize, n: usize) -> Self {
