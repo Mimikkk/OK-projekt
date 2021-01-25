@@ -7,7 +7,7 @@ pub struct SimulatedAnnealing {
 }
 
 impl SimulatedAnnealing {
-    pub fn new(instance: &Instance, annealing_speed: f64, start_temperature: f64) -> Self {
+    pub fn new(instance: Instance, annealing_speed: f64, start_temperature: f64) -> Self {
         Self {
             process: BlackBox::new(instance),
             temperature_start: start_temperature,

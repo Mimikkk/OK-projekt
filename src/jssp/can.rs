@@ -8,7 +8,7 @@ pub struct Candidate {
 }
 
 impl Candidate {
-    pub fn new(mut order: &Vec<usize>, process: &mut BlackBox) -> Self {
+    pub fn new(order: &Vec<usize>, process: &mut BlackBox) -> Self {
         let sol = process.map(&order);
         Self { order: order.clone(), makespan: process.find_makespan(&sol) }
     }

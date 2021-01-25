@@ -1,34 +1,27 @@
+#![feature(available_concurrency)]
+#![feature(thread_id_value)]
+
 pub mod jssp;
 
 use jssp::rs::RandomSample;
-use jssp::hc::HillClimber;
 use jssp::Instance;
-use jssp::ga::Genetic;
-use crate::jssp::sa::SimulatedAnnealing;
+use crate::jssp::rs::RandomSampleThreaded;
+
+async fn hewwo() { eprintln!("Hewwo") }
 
 fn main() {
-    let termination_limit = 60;
+    // Config
+    let termination_limit = 10;
     let is_timed = true;
-    let instance_name = "ta01";
+    let instance_name = "ta02";
     let instance_type = "taillard";
 
     let instance = Instance::new(instance_name, instance_type, termination_limit, is_timed);
+    let mut rs = RandomSample::new(instance.clone());
 
-    let mut random_sample = RandomSample::new(&instance);
-    let mut hill_climb_1swap = HillClimber::new(&instance, 16_384);
-    let mut hill_climb_nswap = HillClimber::new(&instance, 16_384);
-    let mut genetic = Genetic::new(&instance);
-
-    let mut annealing_logarithmic =
-        SimulatedAnnealing::new(&instance, 1.1817e-7, 21.7);
-    let mut annealing_exponential =
-        SimulatedAnnealing::new(&instance, 1.1817e-7, 21.7);
-
-    random_sample.solve();
-    // hill_climb_1swap.solve("1swap");
-    // hill_climb_nswap.solve("nswap");
-    // genetic.solve(0.7, 8192, 8192);
-
-    // annealing_logarithmic.solve("logarithmic");
-    // annealing_exponential.solve("exponential");
+    let bb = async_std::task::block_on(rs.solve_async(false));
+    println!("Iter Count: {}", bb.termination_counter);
+    println!("Best Candidate MS: {}", bb.best_candidate.makespan);
+    println!("Time Elapsed: {}", bb.prev_save);
+    println!("Problem Lowerbound: {}", bb.lower_bound);
 }
