@@ -10,7 +10,7 @@ pub struct HillClimber {
 impl HillClimber {
     pub fn new(instance: &Instance, reset_threshold: usize) -> Self {
         Self {
-            process: BlackBox::new(instance),
+            process: BlackBox::new(instance.clone(), String::from("HillClimber with resets")),
 
             reset_threshold,
             reset_counter: 0,
@@ -38,7 +38,7 @@ impl HillClimber {
 
             if next_candidate > prev_candidate {
                 prev_candidate = next_candidate;
-            }
+            } else {}
 
             if prev_candidate > best_candidate {
                 best_candidate = prev_candidate.clone();
@@ -46,10 +46,8 @@ impl HillClimber {
                 self.reset_counter = 0;
             }
         }
-
         self.process.update(&best_candidate);
         let name = format!("hillclimber_{}_restarts", unary_op.to_lowercase());
-        self.process.save(name.as_str()).expect("Failed to save.");
         self.process.clone()
     }
 

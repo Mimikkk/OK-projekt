@@ -12,6 +12,10 @@ use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng, SeedableRng};
 use crate::jssp::can::Candidate;
 use std::sync::Arc;
+use chrono::{DateTime, Utc, Duration};
+use std::collections::hash_set::Union;
+use serde::{Serialize, Serializer};
+use serde::ser::SerializeStruct;
 
 pub mod can;
 pub mod rs;
@@ -96,15 +100,60 @@ impl Instance {
     }
 }
 
+impl Serialize for Instance {
+    fn serialize<S>(&self, serializer: S) -> Result<<S as Serializer>::Ok, <S as Serializer>::Error> where
+        S: Serializer {
+        let mut state = serializer.serialize_struct("instance", 6)?;
+        state.serialize_field("name", &self.id)?;
+        state.serialize_field("machine_count", &self.m)?;
+        state.serialize_field("job_count", &self.n)?;
+        state.serialize_field("termination_limit", &self.termination_limit)?;
+        state.serialize_field("is_timed", &self.is_timed)?;
+        state.serialize_field("data", &self.jobs)?;
+        state.end()
+    }
+}
 
+#[derive(Clone, Serialize)]
 pub struct CandidateSchedule { pub schedule: Vec<Vec<usize>> }
 
 impl CandidateSchedule { fn new(m: usize, n: usize) -> Self { Self { schedule: vec![vec![0; 3 * n]; m] } } }
 
+trait RepresentationMapping { fn map(&self, order: &Vec<usize>) -> CandidateSchedule; }
+
+impl RepresentationMapping for BlackBox {
+    fn map(&self, order: &Vec<usize>) -> CandidateSchedule {
+        let mut machine_state = vec![0; self.instance.m];
+        let mut machine_time = vec![0; self.instance.m];
+        let mut job_state = vec![0; self.instance.n];
+        let mut job_time = vec![0; self.instance.n];
+
+        let jobs = self.instance.jobs.clone();
+        let mut y = CandidateSchedule::new(self.instance.m, self.instance.n);
+
+        let (mut machine, mut job_step): (usize, usize);
+        let (mut start, mut end): (usize, usize);
+        for &job in order.iter() {
+            job_step = job_state[job] * 2;
+            machine = jobs[job][job_step];
+            job_state[job] += 1;
+
+            start = max(machine_time[machine], job_time[job]);
+            end = start + jobs[job][job_step + 1];
+
+            machine_time[machine] = end;
+            job_time[job] = end;
+
+            y.schedule[machine][machine_state[machine]] = job;
+            y.schedule[machine][machine_state[machine] + 1] = start;
+            y.schedule[machine][machine_state[machine] + 2] = end;
+            machine_state[machine] += 3;
+        }
+        y
+    }
+}
 
 trait SearchSpace { fn create(&self) -> Vec<usize>; }
-
-trait RepresentationMapping { fn map(&self, order: &Vec<usize>) -> CandidateSchedule; }
 
 pub struct Counter;
 
@@ -122,22 +171,58 @@ pub trait BinaryOperator { fn apply(&mut self, based_a: &Candidate, based_b: &Ca
 
 #[derive(Clone)]
 pub struct BlackBox {
+    start_time: DateTime<Utc>,
+    end_time: DateTime<Utc>,
+
+    metaheurestic: String,
     instance: Instance,
-    pub(crate) termination_counter: usize,
+    termination_counter: usize,
     timer: std::time::Instant,
-    pub(crate) prev_save: f64,
 
     random: StdRng,
-    pub best_candidate: Candidate,
-    pub history: Vec<usize>,
+    best_candidate: Candidate,
+    history: Vec<(f64, usize)>,
 
-    pub lower_bound: usize,
-    pub upper_bound: usize,
+    lower_bound: usize,
+    upper_bound: usize,
     should_terminate: fn(&mut Self) -> bool,
 }
 
+impl Serialize for BlackBox {
+    fn serialize<S>(&self, serializer: S) -> Result<<S as Serializer>::Ok, <S as Serializer>::Error> where
+        S: Serializer {
+        let mut state = serializer.serialize_struct("candidate", 4)?;
+        state.serialize_field("author", &"Daniel Zdancewicz");
+
+        #[derive(Serialize)]
+        struct InfoData<'a> {
+            instance: &'a Instance,
+            upper_bound: usize,
+            lower_bound: usize,
+            metaheurestic: String,
+            start: String,
+            end: String,
+            timetaken: String,
+            iteration_count: usize,
+        }
+        state.serialize_field("info", &InfoData {
+            start: self.start_time.format("%Y-%m-%d %H:%M:%S").to_string(),
+            end: self.end_time.format("%Y-%m-%d %H:%M:%S").to_string(),
+            lower_bound: self.lower_bound,
+            upper_bound: self.upper_bound,
+            timetaken: (self.end_time - self.start_time).to_string(),
+            metaheurestic: self.metaheurestic.clone(),
+            instance: &self.instance,
+            iteration_count: self.termination_counter,
+        });
+        state.serialize_field("solution", &self.best_candidate);
+        state.serialize_field("history", &self.history);
+        state.end()
+    }
+}
+
 impl BlackBox {
-    fn new(instance: Instance) -> Self {
+    fn new(instance: Instance, metaheurestic: String) -> Self {
         let should_terminate: fn(&mut Self) -> bool = match instance.is_timed {
             true => <Self as TerminationCriterion<Time>>::should_terminate,
             false => <Self as TerminationCriterion<Counter>>::should_terminate,
@@ -146,9 +231,11 @@ impl BlackBox {
         let mut bb = Self {
             instance,
             should_terminate,
-
+            metaheurestic,
+            start_time: Utc::now(),
+            end_time: Utc::now(),
             random: StdRng::from_entropy(),
-            best_candidate: Candidate { order: vec![], makespan: 0 },
+            best_candidate: Candidate { schedule: vec![], order: vec![], makespan: 0 },
             history: Vec::new(),
 
             lower_bound: 0,
@@ -156,7 +243,6 @@ impl BlackBox {
 
             termination_counter: 0,
             timer: std::time::Instant::now(),
-            prev_save: 0f64,
         };
 
         bb.best_candidate = <Self as NullaryOperator>::apply(&mut bb);
@@ -164,52 +250,41 @@ impl BlackBox {
         bb.upper_bound = bb.find_upper_bound();
         bb
     }
+
+    pub(crate) fn finalize(mut self) -> Self {
+        self.end_time = Utc::now();
+        self
+    }
+
+    fn update(&mut self, candidate: &Candidate) {
+        self.update_history(candidate);
+        self.update_history(candidate);
+    }
+
     fn update_candidate(&mut self, candidate: &Candidate) {
         self.best_candidate = candidate.clone();
     }
 
     fn update_history(&mut self, candidate: &Candidate) {
         let current_time = self.timer.elapsed().as_secs_f64();
+
         match self.history.last() {
             None => {
-                self.prev_save = current_time;
-                self.history.push(candidate.makespan);
+                self.history.push((current_time, candidate.makespan));
             }
-            Some(&makespan) => {
-                if makespan > candidate.makespan || current_time - self.prev_save > 0.01 {
-                    self.prev_save = current_time;
-                    self.history.push(candidate.makespan);
+            Some(&(prev_time, makespan)) => {
+                if makespan > candidate.makespan || current_time - prev_time > 0.01 {
+                    self.history.push((current_time, candidate.makespan));
                 }
             }
         }
     }
 
-    fn save(&mut self, name: &str) -> std::io::Result<()> {
-        self.save_schedule(name)?;
-        self.save_history(name)?;
-        Ok(())
-    }
-    fn save_history(&self, name: &str) -> std::io::Result<()> {
-        let s = format!("solutions\\{}_{}_history.txt", self.instance.id, name);
-        let path = Path::new(s.as_str());
-        let mut file = File::create(path)?;
-
-        for i in self.history.iter() { write!(file, "{} ", i)? }
-        write!(file, "\n")?;
-        Ok(())
-    }
-    fn save_schedule(&mut self, name: &str) -> std::io::Result<()> {
-        let s = format!("solutions\\{}_{}_solution.txt", self.instance.id, name);
-        let path = Path::new(s.as_str());
-        let mut file = File::create(path)?;
-
-        writeln!(file, "{} {}", self.instance.n, self.instance.m)?;
-        writeln!(file, "{}", self.best_candidate.makespan)?;
-        for line in self.map(&self.best_candidate.order).schedule.iter() {
-            for i in line { write!(file, "{} ", i)? }
-            write!(file, "\n")?;
-        }
-
+    pub fn save_to_file(&self) -> std::io::Result<()> {
+        let data = serde_json::to_string_pretty(&self)?;
+        let filepath = format!("solutions/{}.json", self.start_time.format("%d%m%Y-%H-%M-%S"));
+        let mut fp = File::create(Path::new(filepath.as_str()))?;
+        write!(fp, "{}", data)?;
         Ok(())
     }
 
@@ -260,38 +335,6 @@ impl SearchSpace for BlackBox {
     }
 }
 
-impl RepresentationMapping for BlackBox {
-    fn map(&self, order: &Vec<usize>) -> CandidateSchedule {
-        let mut machine_state = vec![0; self.instance.m];
-        let mut machine_time = vec![0; self.instance.m];
-        let mut job_state = vec![0; self.instance.n];
-        let mut job_time = vec![0; self.instance.n];
-
-        let jobs = self.instance.jobs.clone();
-        let mut y = CandidateSchedule::new(self.instance.m, self.instance.n);
-
-        let (mut machine, mut job_step): (usize, usize);
-        let (mut start, mut end): (usize, usize);
-        for &job in order.iter() {
-            job_step = job_state[job] * 2;
-            machine = jobs[job][job_step];
-            job_state[job] += 1;
-
-            start = max(machine_time[machine], job_time[job]);
-            end = start + jobs[job][job_step + 1];
-
-            machine_time[machine] = end;
-            job_time[job] = end;
-
-            y.schedule[machine][machine_state[machine]] = job;
-            y.schedule[machine][machine_state[machine] + 1] = start;
-            y.schedule[machine][machine_state[machine] + 2] = end;
-            machine_state[machine] += 3;
-        }
-        y
-    }
-}
-
 impl TerminationCriterion<Counter> for BlackBox {
     fn should_terminate(&mut self) -> bool {
         self.termination_counter += 1;
@@ -319,8 +362,8 @@ impl UnaryOperator1Swap for BlackBox {
         let mut result = based.order.clone();
 
         let high = based.order.len();
-        let (i, mut j) = (self.random.gen_range(0, high), self.random.gen_range(0, high));
-        while result[i] == result[j] { j = self.random.gen_range(0, high) }
+        let (i, mut j) = (self.random.gen_range(0..high), self.random.gen_range(0..high));
+        while result[i] == result[j] { j = self.random.gen_range(0..high) }
         result.swap(i, j);
         Candidate::new(&result, self)
     }
@@ -332,8 +375,8 @@ impl UnaryOperatorNSwap for BlackBox {
         let high = based.order.len();
 
         loop {
-            let (i, mut j) = (self.random.gen_range(0, high), self.random.gen_range(0, high));
-            while result[i] == result[j] { j = self.random.gen_range(0, high) }
+            let (i, mut j) = (self.random.gen_range(0..high), self.random.gen_range(0..high));
+            while result[i] == result[j] { j = self.random.gen_range(0..high) }
             result.swap(i, j);
 
             if self.random.gen() { break; }

@@ -8,4 +8,7 @@ edition = "2018"
 itertools = "*"
 rand = "*"
 futures = "*"
-async-std = { version = "*", features= ["attributes"] }
+async-std = { version = "*", features = ["attributes"] }
+chrono = "*"
+serde = { version = "1.0.62", features = ["derive"] }
+serde_json = "1.0.62"

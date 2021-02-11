@@ -11,8 +11,8 @@ use std::borrow::BorrowMut;
 pub struct RandomSampleThreaded { instance: Instance }
 
 impl RandomSampleThreaded {
-    pub fn new(instance: Instance) -> Self {
-        Self { instance }
+    pub fn new(instance: &Instance) -> Self {
+        Self { instance: instance.clone() }
     }
     pub fn solve(&self) -> BlackBox {
         let available_threads_count =
@@ -21,19 +21,19 @@ impl RandomSampleThreaded {
         println!("Thread Count: {}", available_threads_count);
         let handles = (0..available_threads_count).map(|_| {
             let inst = self.instance.clone();
-            std::thread::spawn(|| { RandomSample::new(inst).solve(false) })
+            std::thread::spawn(|| RandomSample::new(inst).solve())
         }).collect_vec();
 
-        let bbs = handles.into_iter().map(|x|
-            (x.thread().id().as_u64().get(), x.join().unwrap())).collect_vec();
+        let bbs = handles.into_iter().map(|x| (x.thread().id().as_u64().get(), x.join().unwrap())).collect_vec();
 
         for (id, bb) in bbs.iter() {
             println!("Thread ID: {}", id);
             println!("Iter Count: {}", bb.termination_counter);
             println!("Best Candidate MS: {}", bb.best_candidate.makespan);
-            println!("Time Elapsed: {}", bb.prev_save);
+            println!("Time Elapsed: {}", bb.end_time);
             println!("Problem Lowerbound: {}", bb.lower_bound);
         }
+
 
         let best_solution =
             bbs.into_iter().max_by_key(|(_, bb)| bb.best_candidate.makespan).unwrap();
@@ -45,22 +45,25 @@ impl RandomSampleThreaded {
 pub struct RandomSample { process: BlackBox }
 
 impl RandomSample {
-    pub fn new(instance: Instance) -> Self { Self { process: BlackBox::new(instance) } }
+    pub fn new(instance: Instance) -> Self {
+        Self { process: BlackBox::new(instance, String::from("random sample")) }
+    }
 
-    pub fn solve(&mut self, should_save: bool) -> BlackBox {
+    pub fn solve(&mut self) -> BlackBox {
+        let mut process = self.process.clone();
         let mut solution: Candidate = <BlackBox as NullaryOperator>::apply(&mut self.process);
         let mut best_solution = solution.clone();
-        while !(self.process.should_terminate)(&mut self.process) {
-            solution = <BlackBox as NullaryOperator>::apply(&mut self.process);
-            self.process.update_history(&best_solution);
+
+
+        while !(self.process.should_terminate)(&mut process) {
+            solution = <BlackBox as NullaryOperator>::apply(&mut process);
+            process.update_history(&best_solution);
 
             if solution > best_solution { best_solution = solution }
         }
+        process.update(&best_solution);
 
-        self.process.update_candidate(&best_solution);
-        self.process.update_history(&best_solution);
-        if should_save { self.process.save("random_sample").expect("Failed to Save."); }
-        self.process.clone()
+        process.finalize()
     }
 
     pub async fn solve_async(&mut self, should_save: bool) -> BlackBox {

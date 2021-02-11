@@ -9,7 +9,7 @@ pub struct SimulatedAnnealing {
 impl SimulatedAnnealing {
     pub fn new(instance: Instance, annealing_speed: f64, start_temperature: f64) -> Self {
         Self {
-            process: BlackBox::new(instance),
+            process: BlackBox::new(instance, String::from("Simulated Annealing")),
             temperature_start: start_temperature,
             annealing_speed,
         }
@@ -40,14 +40,15 @@ impl SimulatedAnnealing {
 
         self.process.update(&best_solution);
         let name = format!("annealing_{}", temperature_operator.to_lowercase());
-        self.process.save(name.as_str()).expect("Failed to Save.");
         self.process.clone()
     }
 }
 
 
 struct Exponential;
+
 struct Logarithmic;
+
 trait TemperatureSchedule<T> { fn temperature(&self) -> f64; }
 
 impl TemperatureSchedule<Exponential> for SimulatedAnnealing {

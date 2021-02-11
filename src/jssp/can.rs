@@ -1,16 +1,19 @@
-use crate::jssp::{BlackBox, RepresentationMapping};
+use crate::jssp::{BlackBox, RepresentationMapping, CandidateSchedule};
 use std::cmp::{Ordering};
+use serde::{Serialize, Serializer};
+use serde::ser::SerializeStruct;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct Candidate {
+    pub makespan: usize,
     pub order: Vec<usize>,
-    pub makespan: usize
+    pub schedule: Vec<Vec<usize>>,
 }
 
 impl Candidate {
     pub fn new(order: &Vec<usize>, process: &mut BlackBox) -> Self {
         let sol = process.map(&order);
-        Self { order: order.clone(), makespan: process.find_makespan(&sol) }
+        Self { order: order.clone(), makespan: process.find_makespan(&sol), schedule: sol.schedule }
     }
 }
 

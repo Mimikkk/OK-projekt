@@ -9,7 +9,7 @@ pub struct Genetic {
 impl Genetic {
     pub fn new(instance: &Instance) -> Self {
         Self {
-            process: BlackBox::new(instance),
+            process: BlackBox::new(instance.clone(), String::from("Genetic with clearing")),
         }
     }
     fn find_clear_length(&mut self, p: &mut Vec<Candidate>, mu: usize) -> usize {
@@ -47,8 +47,8 @@ impl Genetic {
             let mut p1 = 0;
             for i in u..length {
                 candidates[i] = if self.process.random.gen_bool(crossover_chance) {
-                    let mut p2 = self.process.random.gen_range(0, u);
-                    while p1 == p2 { p2 = self.process.random.gen_range(0, u) }
+                    let mut p2 = self.process.random.gen_range(0..u);
+                    while p1 == p2 { p2 = self.process.random.gen_range(0..u) }
                     <BlackBox as BinaryOperator>::apply(&mut self.process, &candidates[p1], &candidates[p2])
                 } else { <BlackBox as UnaryOperatorNSwap>::apply(&mut self.process, &candidates[p1]) };
                 p1 = (p1 + 1) % u;
@@ -57,7 +57,6 @@ impl Genetic {
 
         candidates.sort_by_key(|x| x.makespan);
         self.process.update(&candidates[0]);
-        self.process.save("genetic").expect("Failed to save.");
         self.process.clone()
     }
 }
