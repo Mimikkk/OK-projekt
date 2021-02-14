@@ -16,6 +16,10 @@ use chrono::{DateTime, Utc, Duration};
 use std::collections::hash_set::Union;
 use serde::{Serialize, Serializer};
 use serde::ser::SerializeStruct;
+use futures::io::Error;
+use std::fmt::Display;
+use serde::__private::Formatter;
+use custom_error::custom_error;
 
 pub mod can;
 pub mod rs;
@@ -24,74 +28,71 @@ pub mod ga;
 pub mod sa;
 
 #[derive(Clone)]
-pub struct Instance {
-    jobs: Vec<Vec<usize>>,
-    id: String,
-    m: usize,
-    n: usize,
-    termination_limit: usize,
-    is_timed: bool,
+pub enum InstanceType {
+    ORLIB,
+    TAILLARD,
 }
 
-impl Instance {
-    pub fn new(instance_name: &str, instance_type: &str, termination_limit: usize, is_timed: bool) -> Self {
-        let instance_data = match instance_type.to_lowercase().as_str() {
-            "orlib" => { Self::read_orlib(instance_name.to_string()) }
-            "taillard" => { Self::read_taillard(instance_name.to_string()) }
-            _ => { panic!("Wrong instance type {}", instance_type) }
-        };
-        if instance_data.is_empty() { panic!("Empty instance") }
+impl Display for InstanceType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            InstanceType::ORLIB => write!(f, "Orlib"),
+            InstanceType::TAILLARD => write!(f, "Taillard"),
+        }
+    }
+}
 
-        Self {
-            n: instance_data.len(),
-            termination_limit,
-            m: instance_data[0].len() / 2,
-            jobs: instance_data,
-            id: instance_name.to_string(),
-            is_timed,
+struct InstanceReader<'a> {
+    name: &'a str,
+    type_: &'a InstanceType,
+}
+
+impl<'a> InstanceReader<'a> {
+    fn read(name: &'a str, type_: &'a InstanceType) -> Vec<Vec<usize>> {
+        Self { name, type_ }.read_instance_data()
+    }
+
+    fn read_instance_data(&self) -> Vec<Vec<usize>> {
+        match self.type_ {
+            InstanceType::ORLIB => self.read_orlib(),
+            InstanceType::TAILLARD => self.read_taillard(),
         }
     }
 
-    fn read_orlib(instance_name: String) -> Vec<Vec<usize>> {
-        let s = format!("instances\\{}.txt", instance_name);
+    fn read_orlib(&self) -> Vec<Vec<usize>> {
+        let s = format!("instances\\{}.txt", self.name);
         let path = Path::new(s.as_str());
 
-        let contents = BufReader::new(File::open(path)
-            .expect("failed to load the file"));
-
-        contents.lines().skip(1).map(|x| {
-            x.expect("Failed to map a line")
-                .split_whitespace()
-                .map(|x| x.parse()
-                    .expect("Failed to parse the number."))
+        BufReader::new(File::open(path).unwrap()).lines().skip(1).map(|x| {
+            x.unwrap().split_whitespace()
+                .map(|x| x.parse().unwrap())
                 .collect()
         }).collect()
     }
 
-    fn read_taillard(instance_name: String) -> Vec<Vec<usize>> {
-        let s = format!("instances\\{}.txt", instance_name);
+    fn read_taillard(&self) -> Vec<Vec<usize>> {
+        let s = format!("instances\\{}.txt", self.name);
         let path = Path::new(s.as_str());
 
-        let contents = BufReader::new(File::open(path)
-            .expect("failed to load the file"));
+        let contents = BufReader::new(File::open(path).unwrap());
 
         let mut a: usize = 0;
         let mut _b: usize = 0;
         let mut times: Vec<Vec<usize>> = Vec::new();
         let mut machines: Vec<Vec<usize>> = Vec::new();
         for (i, line) in contents.lines().skip(1)
-            .map(|x| x.expect("line wasn't read properly")).enumerate() {
+            .map(|x| x.unwrap()).enumerate() {
             if i == 0 {
                 let vec: Vec<usize> = line.split_whitespace()
-                    .map(|x| x.parse().expect("Not parse the number.")).collect_vec();
+                    .map(|x| x.parse().unwrap()).collect_vec();
                 a = vec[0];
                 _b = vec[1];
             } else if i == 1 || i == a + 2 { continue; } else if i < a + 2 {
                 times.push(line.split_whitespace().map(|x|
-                    x.parse::<usize>().expect("Invalid digit.")).collect())
+                    x.parse::<usize>().unwrap()).collect())
             } else {
                 machines.push(line.split_whitespace().map(|x|
-                    x.parse::<usize>().expect("Invalid digit.") - 1).collect())
+                    x.parse::<usize>().unwrap() - 1).collect())
             }
         }
 
@@ -100,11 +101,39 @@ impl Instance {
     }
 }
 
+#[derive(Clone)]
+pub struct Instance {
+    jobs: Vec<Vec<usize>>,
+    name: String,
+    type_: InstanceType,
+    m: usize,
+    n: usize,
+    termination_limit: usize,
+    is_timed: bool,
+}
+
+impl Instance {
+    pub fn new(name: &str, type_: InstanceType, termination_limit: usize, is_timed: bool) -> Self {
+        let instance_data = InstanceReader::read(name, &type_);
+        Self {
+            name: String::from(name),
+            type_,
+            termination_limit,
+            is_timed,
+
+            n: instance_data.len(),
+            m: instance_data[0].len() / 2,
+            jobs: instance_data,
+        }
+    }
+}
+
 impl Serialize for Instance {
-    fn serialize<S>(&self, serializer: S) -> Result<<S as Serializer>::Ok, <S as Serializer>::Error> where
-        S: Serializer {
-        let mut state = serializer.serialize_struct("instance", 6)?;
-        state.serialize_field("name", &self.id)?;
+    fn serialize<S>(&self, serializer: S) -> Result<<S as Serializer>::Ok, <S as Serializer>::Error>
+        where S: Serializer {
+        let mut state = serializer.serialize_struct("instance", 7)?;
+        state.serialize_field("name", &self.name)?;
+        state.serialize_field("type", &self.type_.to_string())?;
         state.serialize_field("machine_count", &self.m)?;
         state.serialize_field("job_count", &self.n)?;
         state.serialize_field("termination_limit", &self.termination_limit)?;
@@ -258,7 +287,7 @@ impl BlackBox {
 
     fn update(&mut self, candidate: &Candidate) {
         self.update_history(candidate);
-        self.update_history(candidate);
+        self.update_candidate(candidate);
     }
 
     fn update_candidate(&mut self, candidate: &Candidate) {

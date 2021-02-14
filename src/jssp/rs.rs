@@ -6,6 +6,8 @@ use futures::{Stream, StreamExt};
 use futures::executor::block_on;
 use itertools::join;
 use std::borrow::BorrowMut;
+use std::thread;
+use futures::channel::mpsc;
 
 
 pub struct RandomSampleThreaded { instance: Instance }
@@ -49,63 +51,68 @@ impl RandomSample {
         Self { process: BlackBox::new(instance, String::from("random sample")) }
     }
 
-    pub fn solve(&mut self) -> BlackBox {
+    pub fn solve(&self) -> BlackBox {
         let mut process = self.process.clone();
-        let mut solution: Candidate = <BlackBox as NullaryOperator>::apply(&mut self.process);
+        let mut solution: Candidate = <BlackBox as NullaryOperator>::apply(&mut process);
         let mut best_solution = solution.clone();
 
 
-        while !(self.process.should_terminate)(&mut process) {
+        while !(process.should_terminate)(&mut process) {
             solution = <BlackBox as NullaryOperator>::apply(&mut process);
             process.update_history(&best_solution);
 
             if solution > best_solution { best_solution = solution }
         }
-        process.update(&best_solution);
 
+        process.update(&best_solution);
         process.finalize()
     }
 
-    pub async fn solve_async(&mut self, should_save: bool) -> BlackBox {
-        let mut gen = Generator::new(self.process.clone());
-        let mut candidate: Candidate = gen.next().await.unwrap();
+    pub fn solve_threaded(&self) -> BlackBox {
+        let handles = (0..thread::available_concurrency().expect("Failed to get thread count").get())
+            .map(|_| {
+                let rs = RandomSample::new(self.process.instance.clone());
+                thread::spawn(move || rs.solve())
+            })
+            .collect_vec();
 
-        // let timer = async { while !(self.process.should_terminate)(&mut self.process) {} };
-        async_std::task::yield_now();
+        let bbs = handles
+            .into_iter()
+            .map(|x| x.join().expect("Failed to extract the Black box"))
+            .collect_vec();
 
-        let mut timer = Timer::new(self.process.clone());
-
-        loop {
-            gen.next().await.unwrap();
-            if !timer.next().await.unwrap() { break; }
-        };
-        println!("{}", self.process.termination_counter);
-        println!("{}", gen.process.termination_counter);
-        self.process.clone()
+        println!("Used {} threads", bbs.len());
+        println!("With {} total iterations", bbs.iter().fold(0, |a, b| a + b.termination_counter));
+        println!("In the time of {}s", self.process.instance.termination_limit);
+        bbs.into_iter().max_by_key(|x| x.best_candidate.makespan).unwrap().clone()
     }
-}
 
-struct Generator { process: BlackBox }
+    pub async fn solve_async(&mut self) -> BlackBox {
+        let mut process = self.process.clone();
 
-impl Generator { fn new(process: BlackBox) -> Self { Self { process } } }
+        // MPSC
+        let (mut tx, mut rx) = mpsc::channel(1000);
+        (0..100).for_each(|_| {
+            let mut tx = tx.clone();
+            let mut gen_process = self.process.clone();
+            thread::spawn(move || {
+                while !tx.is_closed() {
+                    tx.start_send(<BlackBox as NullaryOperator>::apply(&mut gen_process));
+                }
+            });
+        });
 
-impl async_std::stream::Stream for Generator {
-    type Item = Candidate;
+        let mut solution: Candidate = rx.next().await.expect("Failed to get next Candidate");
+        let mut best_solution = solution.clone();
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.process.termination_counter += 1;
-        Poll::Ready(Some(<BlackBox as NullaryOperator>::apply(&mut self.process)))
-    }
-}
+        while !(self.process.should_terminate)(&mut process) {
+            solution = rx.next().await.expect("Failed to get next Candidate");
 
-struct Timer { process: BlackBox }
+            process.update_history(&best_solution);
+            if solution > best_solution { best_solution = solution }
+        }
 
-impl Timer { fn new(process: BlackBox) -> Self { Self { process } } }
-
-impl async_std::stream::Stream for Timer {
-    type Item = bool;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(Some((self.process.should_terminate)(self.process.borrow_mut())))
+        process.update(&best_solution);
+        process.finalize()
     }
 }
