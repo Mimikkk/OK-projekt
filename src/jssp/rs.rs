@@ -87,12 +87,12 @@ impl RandomSample {
         bbs.into_iter().max_by_key(|x| x.best_candidate.makespan).unwrap().clone()
     }
 
-    pub async fn solve_async(&mut self) -> BlackBox {
+    pub async fn solve_async(&mut self, async_count: usize) -> BlackBox {
         let mut process = self.process.clone();
 
         // MPSC
-        let (mut tx, mut rx) = mpsc::channel(1000);
-        (0..100).for_each(|_| {
+        let (mut tx, mut rx) = mpsc::channel(20);
+        (0..async_count).for_each(|_| {
             let mut tx = tx.clone();
             let mut gen_process = self.process.clone();
             thread::spawn(move || {

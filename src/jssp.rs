@@ -205,7 +205,7 @@ pub struct BlackBox {
 
     metaheurestic: String,
     instance: Instance,
-    termination_counter: usize,
+    pub termination_counter: usize,
     timer: std::time::Instant,
 
     random: StdRng,
