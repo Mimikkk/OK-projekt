@@ -29,8 +29,8 @@ fn main() {
     let instance = Instance::new(instance_name, instance_type, termination_limit, is_timed);
     let mut rs = RandomSample::new(instance.clone());
     let mut hc = HillClimber::new(&instance, 1_676, "nswap");
-    hc.solve_threaded().save_to_file();
-    // block_on(rs.solve_async()).save_to_file();
+    // hc.solve_threaded().save_to_file();
+    block_on(rs.solve_async()).save_to_file();
     // rs.solve().save_to_file();
     // rs.solve_threaded().save_to_file();
 }
